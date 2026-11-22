@@ -1,0 +1,500 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "quarrel-rs API",
+    "description": "OpenAI-compatible inference API and operations endpoints. Inference handlers return 501 until Phase 5 of docs/roadmap.md.",
+    "contact": {
+      "name": "quarrel-rs contributors"
+    },
+    "license": {
+      "name": "Unlicense",
+      "identifier": "Unlicense"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Minimal embedded WebUI placeholder (replaced by the embedded bundle in Phase 5).",
+        "operationId": "root",
+        "responses": {
+          "200": {
+            "description": "Landing page",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Swagger UI page. Assets are pinned from unpkg; Phase 5 replaces this with an embedded bundle.",
+        "operationId": "docs",
+        "responses": {
+          "200": {
+            "description": "Swagger UI",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness probe.",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Prometheus exposition endpoint.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Generated OpenAPI 3.1 document.",
+        "operationId": "openapi_json",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Readiness probe. Reports that no model is loaded until Phase 1 is implemented.",
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "summary": "OpenAI chat completions. Reserved for Phase 5.",
+        "operationId": "chat_completions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Chat completion"
+          },
+          "501": {
+            "description": "Not implemented until Phase 5"
+          }
+        }
+      }
+    },
+    "/v1/completions": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "summary": "OpenAI completions. Reserved for Phase 5.",
+        "operationId": "completions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Completion"
+          },
+          "501": {
+            "description": "Not implemented until Phase 5"
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "tags": [
+          "openai"
+        ],
+        "summary": "OpenAI embeddings. Reserved for Phase 5.",
+        "operationId": "embeddings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Embeddings"
+          },
+          "501": {
+            "description": "Not implemented until Phase 5"
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "openai"
+        ],
+        "summary": "OpenAI model list. Empty until the model resolver lands in Phase 1.",
+        "operationId": "models",
+        "responses": {
+          "200": {
+            "description": "Model list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatCompletionRequest": {
+        "type": "object",
+        "description": "OpenAI chat completion request (subset supported by the eventual implementation).",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Maximum number of generated tokens.",
+            "minimum": 0
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "description": "Conversation messages."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model identifier."
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Stream server-sent events when true."
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Sampling temperature."
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "description": "A chat message.",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Message content."
+          },
+          "role": {
+            "type": "string",
+            "description": "One of `system`, `user`, `assistant` or `tool`."
+          }
+        }
+      },
+      "CompletionRequest": {
+        "type": "object",
+        "description": "Legacy completion request.",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Maximum number of generated tokens.",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string",
+            "description": "Model identifier."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Prompt text."
+          }
+        }
+      },
+      "EmbeddingRequest": {
+        "type": "object",
+        "description": "Embedding request.",
+        "required": [
+          "model",
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Input strings to embed."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model identifier."
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "description": "OpenAI error detail object.",
+        "required": [
+          "message",
+          "type"
+        ],
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Machine-readable code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable message."
+          },
+          "param": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Offending parameter, when known."
+          },
+          "type": {
+            "type": "string",
+            "description": "Error category."
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "description": "Top-level OpenAI error envelope.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail",
+            "description": "Error details."
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "description": "Liveness probe response.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `ok` when the process is alive."
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "description": "A model as reported by `GET /v1/models`.",
+        "required": [
+          "id",
+          "object",
+          "owned_by"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Model identifier used in requests."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `model` for OpenAI compatibility."
+          },
+          "owned_by": {
+            "type": "string",
+            "description": "Owning organisation, reserved for future multi-tenant support."
+          }
+        }
+      },
+      "ModelList": {
+        "type": "object",
+        "description": "OpenAI model list response.",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "description": "Available models; empty until Phase 1 lands the resolver."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `list`."
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "description": "Readiness probe response.",
+        "required": [
+          "status",
+          "model_loaded"
+        ],
+        "properties": {
+          "model_loaded": {
+            "type": "boolean",
+            "description": "Whether a model is loaded (false until Phase 1)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ready` or `unavailable`."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Liveness, readiness and metrics"
+    },
+    {
+      "name": "openai",
+      "description": "OpenAI-compatible inference endpoints"
+    }
+  ]
+}

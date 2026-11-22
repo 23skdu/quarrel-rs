@@ -1,0 +1,31 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "quarrel.fullname" . }}
+  labels:
+    {{- include "quarrel.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: quarrel.rules
+      rules:
+        - alert: QuarrelHighErrorRate
+          expr: |
+            sum(rate(quarrel_requests_total{status=~"5.."}[5m]))
+              / clamp_min(sum(rate(quarrel_requests_total[5m])), 1) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "quarrel 5xx rate above 5%"
+        - alert: QuarrelUnavailable
+          expr: up{job=~".*quarrel.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "quarrel target is down"
+{{- end }}

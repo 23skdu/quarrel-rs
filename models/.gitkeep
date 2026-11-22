@@ -1,0 +1,2 @@
+# Placeholder so the default models directory exists for /readyz.
+# Mount GGUF files here (see docker-compose.yml and helm/quarrel/values.yaml).

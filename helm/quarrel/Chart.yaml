@@ -1,0 +1,16 @@
+apiVersion: v2
+name: quarrel
+description: quarrel-rs — Arrow-native Rust inference control plane
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - inference
+  - arrow
+  - grpc
+  - openai
+home: https://github.com/23skdu/quarrel-rs
+sources:
+  - https://github.com/23skdu/quarrel-rs
+maintainers:
+  - name: quarrel-rs contributors

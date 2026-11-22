@@ -1,0 +1,59 @@
+groups:
+  - name: quarrel.rules
+    interval: 30s
+    rules:
+      - alert: QuarrelHighErrorRate
+        expr: |
+          sum(rate(quarrel_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(quarrel_requests_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel 5xx rate above 5%"
+          description: "More than 5% of HTTP requests returned 5xx for five minutes."
+
+      - alert: QuarrelHighChatLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(quarrel_request_duration_seconds_bucket{endpoint="v1_chat_completions"}[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel chat completion p95 latency above 2s"
+          description: "The 95th percentile of /v1/chat/completions latency is above two seconds."
+
+      - alert: QuarrelMemoryGrowth
+        expr: deriv(quarrel_process_resident_bytes[30m]) > 5000000
+        for: 10m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel RSS is growing steadily"
+          description: "Resident set size is growing by more than 5 MB/s over 30 minutes."
+
+      - alert: QuarrelUnavailable
+        expr: up{job="quarrel"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: quarrel
+        annotations:
+          summary: "quarrel target is down"
+          description: "Prometheus cannot scrape the quarrel control plane."
+
+      - alert: QuarrelRecordersStale
+        expr: time() - timestamp(quarrel_build_info) > 3600
+        for: 5m
+        labels:
+          severity: info
+          service: quarrel
+        annotations:
+          summary: "quarrel build info metric is stale"
+          description: "The process may have restarted with a different metric registry."

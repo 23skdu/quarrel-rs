@@ -1,0 +1,14 @@
+.git
+.github
+target
+**/target
+models/*
+!models/.gitkeep
+*.gguf
+*.safetensors
+*.bin
+.env
+.env.local
+coverage
+*.profraw
+tmp

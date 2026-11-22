@@ -1,0 +1,77 @@
+# Dependabot configuration for quarrel-rs.
+# Keeps Cargo dependencies, the Rust toolchain-related GitHub Actions and container base images
+# current. All Rust crates are upgraded together in grouped PRs where they must stay in lockstep.
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    target-branch: main
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "deps"
+      include: scope
+    groups:
+      # arrow and arrow-flight must always resolve to the same version.
+      arrow:
+        patterns:
+          - "arrow*"
+          - "parquet"
+      # tonic/prost/arrow-flight move together.
+      grpc:
+        patterns:
+          - "tonic*"
+          - "prost*"
+      axum-stack:
+        patterns:
+          - "axum*"
+          - "tower*"
+          - "hyper*"
+      observability:
+        patterns:
+          - "metrics*"
+          - "tracing*"
+          - "opentelemetry*"
+      openapi:
+        patterns:
+          - "utoipa*"
+      cli-and-serde:
+        patterns:
+          - "clap*"
+          - "serde*"
+          - "thiserror"
+    ignore:
+      # MSRV is pinned in rust-toolchain.toml; bump it deliberately, not by a bot.
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    target-branch: main
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    target-branch: main
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "docker"

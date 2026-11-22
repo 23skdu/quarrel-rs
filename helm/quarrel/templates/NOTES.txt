@@ -1,0 +1,20 @@
+quarrel-rs has been deployed as {{ include "quarrel.fullname" . }}.
+
+  API:       kubectl port-forward svc/{{ include "quarrel.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  OpenAPI:   http://localhost:{{ .Values.service.port }}/docs
+  Metrics:   http://localhost:{{ .Values.service.port }}/metrics
+
+Models: {{ .Values.persistence.mountPath }} ({{ include "quarrel.pvcName" . }})
+
+{{- if .Values.ingress.enabled }}
+Ingress hosts:
+{{- range .Values.ingress.hosts }}
+  - http://{{ .host }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.config.apiKey }}
+An API key is required for /v1/* routes (Bearer token).
+{{- else }}
+WARNING: no API key configured; /v1/* routes are unauthenticated.
+{{- end }}
