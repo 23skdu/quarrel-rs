@@ -1,0 +1,6 @@
+---
+source: quarrel-core/src/chat_template.rs
+expression: rendered
+---
+system: Be brief.
+user: Hello!

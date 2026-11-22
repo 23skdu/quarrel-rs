@@ -1,0 +1,28 @@
+[package]
+name = "quarrel-engine"
+description = "Scheduler, KV cache, sampler and reference execution engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+quarrel-core.workspace = true
+quarrel-gguf.workspace = true
+quarrel-simd.workspace = true
+rand.workspace = true
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+insta.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "sampler"
+harness = false

@@ -34,3 +34,12 @@ models/*
 # Tooling output
 *.profraw
 coverage/
+
+# Benchmark results are regenerated on every run; only baselines are committed.
+artifacts/bench/results.json
+artifacts/bench/results.md
+artifacts/bench/*.tmp
+
+# Python bytecode from scripts/bench.py and its tests.
+__pycache__/
+*.py[cod]

@@ -1,0 +1,36 @@
+{
+  "name": "performance",
+  "description": "Reproducible performance checks with short Criterion measurement windows",
+  "warmup": 0,
+  "iterations": 3,
+  "timeout_seconds": 900,
+  "tolerance": 0.1,
+  "commands": [
+    {
+      "name": "release-build",
+      "kind": "performance",
+      "command": "make",
+      "args": ["build-release"],
+      "iterations": 1
+    },
+    {
+      "name": "gguf-quant-kernels",
+      "kind": "performance",
+      "command": "cargo",
+      "args": ["bench", "-p", "quarrel-gguf", "--bench", "quant", "--", "--warm-up-time", "1", "--measurement-time", "2", "--sample-size", "10"]
+    },
+    {
+      "name": "engine-sampler",
+      "kind": "performance",
+      "command": "cargo",
+      "args": ["bench", "-p", "quarrel-engine", "--bench", "sampler", "--", "--warm-up-time", "1", "--measurement-time", "2", "--sample-size", "10"]
+    },
+    {
+      "name": "openapi-generation",
+      "kind": "performance",
+      "command": "sh",
+      "args": ["-c", "cargo run --quiet --release -p quarrel-server -- --print-openapi >/dev/null"],
+      "iterations": 5
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "name": "quality",
+  "description": "Blocking quality gates replayed through the Go benchtool",
+  "warmup": 0,
+  "iterations": 1,
+  "timeout_seconds": 900,
+  "tolerance": 0,
+  "commands": [
+    {
+      "name": "rustfmt",
+      "kind": "quality",
+      "command": "make",
+      "args": ["fmt-check"]
+    },
+    {
+      "name": "clippy",
+      "kind": "quality",
+      "command": "make",
+      "args": ["lint"]
+    },
+    {
+      "name": "unit-tests",
+      "kind": "quality",
+      "command": "make",
+      "args": ["test-unit"]
+    },
+    {
+      "name": "integration-tests",
+      "kind": "quality",
+      "command": "make",
+      "args": ["test"]
+    },
+    {
+      "name": "security",
+      "kind": "quality",
+      "command": "make",
+      "args": ["security"]
+    },
+    {
+      "name": "openapi-contract",
+      "kind": "quality",
+      "command": "make",
+      "args": ["openapi-check"]
+    },
+    {
+      "name": "metrics-contract",
+      "kind": "quality",
+      "command": "make",
+      "args": ["metrics-check"]
+    },
+    {
+      "name": "shellcheck",
+      "kind": "quality",
+      "command": "make",
+      "args": ["shellcheck"]
+    },
+    {
+      "name": "helm-chart",
+      "kind": "quality",
+      "command": "make",
+      "args": ["helm-lint"]
+    },
+    {
+      "name": "compose-config",
+      "kind": "quality",
+      "command": "docker",
+      "args": ["compose", "config", "--quiet"]
+    }
+  ]
+}

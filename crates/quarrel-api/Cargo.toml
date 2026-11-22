@@ -1,0 +1,29 @@
+[package]
+name = "quarrel-api"
+description = "OpenAI-compatible HTTP plane and generated OpenAPI contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+axum.workspace = true
+clap.workspace = true
+futures.workspace = true
+quarrel-core.workspace = true
+quarrel-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+tower = { workspace = true, features = ["util"] }

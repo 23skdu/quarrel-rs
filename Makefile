@@ -20,15 +20,19 @@ BREW_TOOLS := cargo-nextest cargo-deny cargo-audit bacon cargo-llvm-cov cargo-ed
 	cargo-mutants cargo-bloat cargo-outdated taplo yq jq shellcheck helm
 CARGO_TOOLS := cargo-fuzz cargo-udeps cargo-geiger
 MIRI_TOOLCHAIN := nightly
-REQUIRED_TOOLS := cargo rustfmt helm docker
+FUZZ_TARGETS := gguf_parse sampling_params arrow_ipc
+REQUIRED_TOOLS := cargo rustfmt helm docker shellcheck
 
 OPENAPI_FILE := api/openapi.json
 HOOKS_DIR := $(shell git rev-parse --git-path hooks 2>/dev/null || printf '.git/hooks')
 
 .PHONY: help tools tools-brew tools-cargo tools-miri check-tools makehooks unmakehooks precommit \
-	build build-release run test test-unit nextest fmt fmt-check lint audit deny security \
-	coverage bench fuzz miri mutants outdated doc bloat openapi openapi-check metrics-check \
-	docker-build docker-up docker-down docker-logs helm-lint helm-template links ci clean distclean
+	build build-release run test test-unit test-benchtool nextest fmt fmt-check lint audit deny \
+	security shellcheck \
+	coverage coverage-floors bench bench-quality bench-performance bench-regression \
+	fuzz fuzz-smoke fuzz-coverage miri mutants outdated doc bloat openapi openapi-check metrics-check \
+	docker-build docker-up docker-down docker-logs \
+	helm-lint helm-template links ci clean distclean
 
 ## Display this help message
 help:
@@ -103,6 +107,15 @@ test:
 test-unit:
 	$(CARGO) test --workspace --locked --lib --bins
 
+## Test the Go benchtool and its Python driver (no Rust build required)
+test-benchtool:
+	@test -z "$$(gofmt -l cmd/benchtool)" || { echo "gofmt required for cmd/benchtool"; exit 1; }
+	go vet ./cmd/benchtool
+	go test ./cmd/benchtool
+	python3 -m py_compile scripts/bench.py scripts/test_bench.py
+	python3 -m unittest discover -s scripts -p 'test_*.py' -v
+	python3 scripts/bench.py --profile quality --dry-run
+
 ## Explicit cargo test, useful when debugging a nextest-only failure
 nextest:
 	$(CARGO) test --workspace --locked
@@ -130,26 +143,66 @@ deny:
 ## Run cargo audit and cargo deny together
 security: audit deny
 
+## Shellcheck every tracked shell script
+shellcheck:
+	@git ls-files '*.sh' scripts/pre-commit | xargs -r shellcheck
+
 ## HTML coverage report under target/llvm-cov/html
 coverage:
 	$(CARGO) llvm-cov --workspace --html
+
+## Enforce the per-area coverage floors from docs/gates.md
+coverage-floors:
+	$(CARGO) llvm-cov -p quarrel-core -p quarrel-gguf -p quarrel-simd --fail-under-lines 85
+	$(CARGO) llvm-cov -p quarrel-engine -p quarrel-api -p quarrel-server --fail-under-lines 80
 
 ## Criterion/iai benchmarks (workloads land in Phase 1)
 bench:
 	$(CARGO) bench --workspace --locked
 
-## Fuzz targets (60 s per target by default)
+## Replay all quality gates through the Go benchtool
+bench-quality:
+	python3 scripts/bench.py --profile quality
+
+## Run timed performance checks through the Go benchtool
+bench-performance:
+	python3 scripts/bench.py --profile performance
+
+## Replay quality and performance gates for a release candidate
+bench-regression:
+	python3 scripts/bench.py --profile regression
+
+## Fuzz every target for 60 s (nightly + cargo-fuzz required)
 fuzz:
-	$(CARGO) fuzz run gguf_parse -- -max_total_time=60
-	$(CARGO) fuzz run arrow_schema -- -max_total_time=60
+	@for target in $(FUZZ_TARGETS); do \
+		echo "==> fuzzing $$target for 60s"; \
+		$(CARGO) fuzz run $$target -- -max_total_time=60; \
+	done
+
+## Short 5 s fuzz pass per target, suitable for pull requests
+fuzz-smoke:
+	@for target in $(FUZZ_TARGETS); do \
+		echo "==> fuzzing $$target for 5s"; \
+		$(CARGO) fuzz run $$target -- -max_total_time=5; \
+	done
+
+## Generate coverage reports for every fuzz target corpus
+fuzz-coverage:
+	@for target in $(FUZZ_TARGETS); do \
+		echo "==> fuzz coverage for $$target"; \
+		$(CARGO) fuzz coverage $$target; \
+	done
 
 ## Run the workspace under Miri (requires `make tools-miri`)
 miri:
 	$(CARGO) +$(MIRI_TOOLCHAIN) miri test --workspace
 
-## Mutation testing of the core crates
+## Mutation testing of core, SIMD and sampler logic
 mutants:
-	$(CARGO) mutants -p quarrel-server
+	@for crate in quarrel-core quarrel-simd quarrel-engine; do \
+		echo "==> mutating $$crate"; \
+		$(CARGO) mutants -p $$crate; \
+	done
 
 ## List outdated dependencies without changing the lockfile
 outdated:

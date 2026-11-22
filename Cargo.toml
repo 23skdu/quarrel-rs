@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/quarrel-server"]
+members = [
+    "crates/quarrel-api",
+    "crates/quarrel-core",
+    "crates/quarrel-engine",
+    "crates/quarrel-flight",
+    "crates/quarrel-gguf",
+    "crates/quarrel-server",
+    "crates/quarrel-simd",
+]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,14 +20,36 @@ repository = "https://github.com/23skdu/quarrel-rs"
 authors = ["quarrel-rs contributors"]
 
 [workspace.dependencies]
+# Local crates — versions are explicit so cargo-deny does not treat them as wildcards.
+quarrel-core = { path = "crates/quarrel-core", version = "0.1.0" }
+quarrel-engine = { path = "crates/quarrel-engine", version = "0.1.0" }
+quarrel-gguf = { path = "crates/quarrel-gguf", version = "0.1.0" }
+quarrel-simd = { path = "crates/quarrel-simd", version = "0.1.0" }
+
+# External crates — all versions are pinned here and inherited by member crates.
+arrow = { version = "60", features = ["ipc", "ipc_compression", "async"] }
+arrow-flight = "60"
+async-stream = "0.3"
 axum = "0.8"
+bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
+criterion = "0.8"
+futures = "0.3"
+half = "2"
+insta = "1"
+memmap2 = "0.9"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.17"
+proptest = "1"
+prost = "0.14"
+rand = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+smallvec = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = "0.14"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"

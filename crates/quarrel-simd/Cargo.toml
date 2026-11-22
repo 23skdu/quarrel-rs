@@ -1,0 +1,20 @@
+[package]
+name = "quarrel-simd"
+description = "Scalar and runtime-dispatched numeric kernels for quarrel-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "kernels"
+harness = false

@@ -1,6 +1,9 @@
 # quarrel-rs — Technical Roadmap
 
-> **Status:** Phase 0 (bootstrap) is implemented in this repository. Phases 1–9 are planned work.
+> **Status:** Phase 0 (bootstrap) is implemented. The Phase 1–4 library crates (`quarrel-core`,
+> `quarrel-simd`, `quarrel-gguf`, `quarrel-engine`, `quarrel-flight`) are implemented with unit and
+> property tests. Remaining integration, oracle, fuzz and deployment gates stay open until their
+> acceptance criteria pass.
 > **Goal:** a clean-room Rust rewrite of [`23skdu/longbow-quarrel`](https://github.com/23skdu/longbow-quarrel)
 > that preserves its memory-efficient inference semantics while adding two first-class client planes:
 > an **Arrow Flight (gRPC) zero-copy vector plane for Agents**, and an **OpenAI-compatible HTTP API
@@ -275,9 +278,9 @@ all pass on a clean checkout; `make makehooks && git commit` runs the unit tests
 
 ### Phase 1 — Domain model and parity harness
 
-- [ ] **P1-01** Create `quarrel-core`: `RequestId`, `ModelId`, `SamplingParams`, `FinishReason`,
+- [x] **P1-01** Create `quarrel-core`: `RequestId`, `ModelId`, `SamplingParams`, `FinishReason`,
       `GenerateRequest`, `Token`, `Embedding`, `KvBlock`, non-exhaustive error enum.
-- [ ] **P1-02** Port the config surface of Go `internal/config` to `serde` + `clap` with a single
+- [x] **P1-02** Port the config surface of Go `internal/config` to `serde` + `clap` with a single
       `Config` struct, env prefix `QUARREL_`, and a config-file round-trip test.
 - [ ] **P1-03** Build the oracle harness: load recorded GGUF fixtures from the Go engine, capture
       logits/tokens/KV bytes, and expose `make oracle-gate`.
@@ -291,13 +294,13 @@ Mistral); fuzz targets run for 60 s without a crash.
 
 ### Phase 2 — GGUF reader and zero-copy quantized kernels
 
-- [ ] **P2-01** Parse GGUF v1–v3 headers, KV metadata and tensor descriptors with `zerocopy`-style
+- [x] **P2-01** Parse GGUF v1–v3 headers, KV metadata and tensor descriptors with `zerocopy`-style
       typed views over `&[u8]`; reject truncated/malformed files with typed errors.
-- [ ] **P2-02** Memory-map weights with `memmap2`; expose typed tensor views without copying.
+- [x] **P2-02** Memory-map weights with `memmap2`; expose typed tensor views without copying.
 - [ ] **P2-03** Implement zero-copy matvec for FP32, FP16, BF16, Q8_0, Q6_K, Q5_K, Q4_K, Q4_0,
       Q3_K, Q2_K; prove no intermediate `Vec<f32>` with allocator counters.
 - [ ] **P2-04** Port GGUF writer and `quarrel-quantize` CLI (`q4_k`, `q6_k`, `q8_0`, `f16`, `f32`).
-- [ ] **P2-05** Port on-demand token embedding lookup (never materialise the vocabulary table).
+- [x] **P2-05** Port on-demand token embedding lookup (never materialise the vocabulary table).
 - [ ] **P2-06** Validate TurboQuant KV codec (PolarQuant + QJL) against the Go oracle; 8× compression.
 - [ ] **P2-07** Universal model resolver across `~/.cache/llmfit`, llama.cpp, Hugging Face, Ollama
       tags and explicit paths, with fuzzy matching and a resolver unit test per source.
@@ -315,23 +318,23 @@ green for every supported quant; quantizer output reloads identically.
 - [ ] **P3-05** Sampler: temperature, top-K, top-P, repetition penalty, grammar-constrained PDA.
 - [ ] **P3-06** Dynamic architecture routing for llama/qwen2/qwen35/mistral/gemma4/phi3/smollm2/granite,
       including Qwen 3.5 hybrid SSM + full-attention layers.
-- [ ] **P3-07** Jinja2-subset chat template renderer (`{% for %}`, `{% if %}`, `{% set %}`, `{{ var }}`)
+- [x] **P3-07** Jinja2-subset chat template renderer (`{% for %}`, `{% if %}`, `{% set %}`, `{{ var }}`)
       with a fallback template.
 - [ ] **P3-08** Speculative decoding with `min(1, p_target/p_draft)` acceptance and residual correction.
 - [ ] **P3-09** LoRA adapters: merge-on-load on CPU, hot-swappable fused projection on accelerators.
-- [ ] **P3-10** Engine health audit (NaN/Inf/flat logits) surfaced as metrics and warnings.
+- [x] **P3-10** Engine health audit (NaN/Inf/flat logits) surfaced as metrics and warnings.
 
 **Acceptance:** end-to-end generation matches Go on the golden suite; 100k-token sliding-window
 context holds constant VRAM; no data races under `cargo test --release` + `loom` for the scheduler.
 
 ### Phase 4 — Arrow Flight Agent plane
 
-- [ ] **P4-01** `quarrel-flight` crate with schemas from §2.2 as Rust constants + generated IPC fixtures.
-- [ ] **P4-02** tonic Flight server: `DoPut`, `DoGet`, `DoAction`, `ListFlights`, `GetFlightInfo`.
+- [x] **P4-01** `quarrel-flight` crate with schemas from §2.2 as Rust constants + generated IPC fixtures.
+- [x] **P4-02** tonic Flight server: `DoPut`, `DoGet`, `DoAction`, `ListFlights`, `GetFlightInfo`.
 - [ ] **P4-03** Zero-copy request adapter: Arrow `RecordBatch` → engine requests with no JSON hop.
 - [ ] **P4-04** Zero-copy response adapter: pre-sized builders, pooled buffers, `RecordBatchStream`.
 - [ ] **P4-05** KV block transfer path with dtype metadata and endianness assertions.
-- [ ] **P4-06** Schema-compatibility and drift tests; IPC golden files checked in.
+- [x] **P4-06** Schema-compatibility and drift tests; IPC golden files checked in.
 - [ ] **P4-07** Python client in `pythonsdk/` using `pyarrow.flight` with a notebook-style example.
 - [ ] **P4-08** Smoke benchmark: 250k×384 float vectors round-trip with zero payload copies.
 
@@ -427,6 +430,9 @@ the commands that produced them.
 
 ## 6. Testing strategy
 
+The executable test plan is [docs/testplan.md](testplan.md), benchmark methodology is
+[docs/performance.md](performance.md), and CI enforcement is documented in [docs/gates.md](gates.md).
+
 1. **Unit** — `cargo test --workspace --lib --bins`; mandatory in the pre-commit hook.
 2. **Integration** — `cargo nextest run --workspace`; axum `oneshot` tests and Flight in-process servers.
 3. **Oracle** — recorded Go logits/tokens/KV bytes; `cargo test -p quarrel-oracle` + `make oracle-gate`.
@@ -497,7 +503,10 @@ decode throughput, KV saturation, Flight bytes, layer offload, model load and RS
 | `precommit` | Run the pre-commit hook manually |
 | `build`, `build-release` | `cargo build [--release] --workspace --locked` |
 | `test` | `cargo nextest run --workspace` (falls back to `cargo test --workspace`) |
+| `test-benchtool` | Go/Python tooling tests: `gofmt`, `go vet`, `go test`, `unittest`, profile dry-run |
+| `bench-quality`, `bench-performance`, `bench-regression` | Replay quality/performance profiles through the Go benchtool |
 | `lint`, `fmt`, `fmt-check` | clippy with `-D warnings`, rustfmt apply/check |
+| `shellcheck` | Shellcheck every tracked shell script, including the pre-commit hook |
 | `audit`, `deny`, `security` | `cargo audit`, `cargo deny check`, both |
 | `coverage`, `bench`, `fuzz`, `miri`, `mutants` | quality and performance deep dives |
 | `openapi-check`, `metrics-check` | contract/drift gates |
@@ -514,7 +523,8 @@ Homebrew formulas: `cargo-nextest`, `cargo-deny`, `cargo-audit`, `bacon` (the ma
 `cargo-watch` replacement), `cargo-llvm-cov`, `cargo-edit`, `cargo-mutants`, `cargo-bloat`,
 `cargo-outdated`, `taplo`, `yq`, `jq`, `shellcheck`, `helm`. `make tools-cargo` adds `cargo-fuzz`,
 `cargo-udeps` and `cargo-geiger`, which Homebrew does not package. `make tools-miri` installs the
-nightly toolchain with the `miri` and `rust-src` components.
+nightly toolchain with the `miri` and `rust-src` components. The benchmark tooling additionally
+requires Go ≥ 1.24 and Python ≥ 3.11 (both use their standard libraries only).
 Dependabot opens weekly Cargo PRs; `arrow`/`arrow-flight`, `tonic`/`prost`, the axum/tower/hyper
 stack, `metrics`/`tracing` and `utoipa` are grouped so compatible versions land together.
 
@@ -564,6 +574,11 @@ make precommit             # run the same checks the hook runs
 # Containers and cluster
 make docker-build docker-up
 make helm-lint helm-template
+
+# Gate tooling and performance checks
+make test-benchtool
+make bench-quality
+make bench-performance
 
 # Full gate
 make ci

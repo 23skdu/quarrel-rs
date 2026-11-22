@@ -1,0 +1,26 @@
+[package]
+name = "quarrel-gguf"
+description = "Memory-mapped GGUF reader and quantized tensor views"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytes.workspace = true
+half.workspace = true
+memmap2.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+insta.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "quant"
+harness = false

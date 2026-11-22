@@ -1,0 +1,80 @@
+---
+source: crates/quarrel-gguf/src/tests.rs
+expression: file.header()
+---
+GgufHeader {
+    version: V3,
+    tensor_count: 2,
+    metadata: {
+        "general.architecture": String(
+            "llama",
+        ),
+        "general.file_type": Uint32(
+            6,
+        ),
+        "general.name": String(
+            "quarrel-test",
+        ),
+        "llama.context_length": Uint64(
+            4096,
+        ),
+        "llama.embedding_length": Uint32(
+            32,
+        ),
+        "test.bool": Bool(
+            true,
+        ),
+        "test.float": Float32(
+            0.5,
+        ),
+        "test.negative": Int32(
+            -17,
+        ),
+        "test.numbers": Array(
+            [
+                Uint8(
+                    1,
+                ),
+                Uint8(
+                    2,
+                ),
+                Uint8(
+                    3,
+                ),
+            ],
+        ),
+        "test.strings": Array(
+            [
+                String(
+                    "alpha",
+                ),
+                String(
+                    "beta",
+                ),
+            ],
+        ),
+    },
+    tensors: [
+        TensorDescriptor {
+            name: "token_embeddings.weight",
+            shape: [
+                4,
+                8,
+            ],
+            dtype: Q8_0,
+            offset: 0,
+            byte_len: 34,
+        },
+        TensorDescriptor {
+            name: "output.weight",
+            shape: [
+                2,
+                8,
+            ],
+            dtype: Q4_0,
+            offset: 34,
+            byte_len: 18,
+        },
+    ],
+    data_offset: 544,
+}

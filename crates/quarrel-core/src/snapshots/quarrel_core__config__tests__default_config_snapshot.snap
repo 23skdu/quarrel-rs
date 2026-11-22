@@ -1,0 +1,12 @@
+---
+source: quarrel-core/src/config.rs
+expression: "config.to_json_string().expect(\"serialize default config\")"
+---
+{
+  "listen": "0.0.0.0:8080",
+  "models_dir": "./models",
+  "log_json": false,
+  "api_key": null,
+  "flight_listen": "0.0.0.0:50051",
+  "queue_depth": 64
+}

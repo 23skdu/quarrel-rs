@@ -1,0 +1,28 @@
+[package]
+name = "quarrel-flight"
+description = "Arrow Flight schemas, adapters and gRPC service for Agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+arrow.workspace = true
+arrow-flight.workspace = true
+async-stream.workspace = true
+bytes.workspace = true
+futures.workspace = true
+prost.workspace = true
+quarrel-core.workspace = true
+quarrel-engine.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
