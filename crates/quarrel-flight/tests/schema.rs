@@ -134,6 +134,22 @@ fn schema_hash_is_stable_hex_and_sensitive_to_fields() {
 }
 
 #[test]
+fn embed_schema_hashes_are_stable_and_distinct() {
+    // Hashes are part of the health action contract; changing a field is a
+    // wire-format change and must be reported by quarrel_build_info.
+    assert_eq!(schema_hash(&embed_request_schema()), "f8ea32cf6498f9e7");
+    assert_eq!(schema_hash(&embed_response_schema()), "1e2c5be4abd217ba");
+    assert_ne!(
+        schema_hash(&embed_request_schema()),
+        schema_hash(&embed_response_schema())
+    );
+    assert_ne!(
+        schema_hash(&embed_response_schema()),
+        schema_hash(&generate_response_schema())
+    );
+}
+
+#[test]
 fn canonical_fields_json_is_deterministic() {
     let fields = generate_response_schema().fields().clone();
     assert_eq!(

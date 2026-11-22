@@ -1,7 +1,8 @@
 # Arrow Flight contract for Agents
 
-> Status: **planned for Phase 4** of [the roadmap](../docs/roadmap.md). This file is the normative
-> schema contract; implementation must not drift from it without a major version bump.
+> Status: **implemented in Phase 4**. This file is the normative schema contract; implementation
+> must not drift from it without a major version bump. The Rust service lives in
+> `crates/quarrel-flight` and the Python client lives in `pythonsdk/quarrel_flight`.
 
 The Flight service is the primary Agent-facing interface. It carries Arrow `RecordBatch`es over
 gRPC with no JSON conversion and no payload copies. HTTP/OpenAI remains the compatibility plane.
@@ -52,13 +53,29 @@ gRPC with no JSON conversion and no payload copies. HTTP/OpenAI remains the comp
 | `finish_reason` | `Dictionary<UInt16, Utf8>` | `null` until terminal |
 | `finished` | `Boolean` | Terminal batch flag |
 
+### `embed.request`
+
+| Field | Arrow type | Notes |
+|-------|------------|-------|
+| `request_id` | `Utf8` | Client-generated id used as the `DoGet` ticket |
+| `token_id` | `Int32` | Token to embed; one row per token |
+
+A batch may carry several rows. The server groups response batches by
+`request_id`, so one request id per `DoPut` call is recommended.
+
 ### `embed.response`
 
 | Field | Arrow type | Notes |
 |-------|------------|-------|
 | `request_id` | `Utf8` | Echoed |
 | `token_id` | `Int32` | Source token |
-| `embedding` | `FixedSizeList<Float16 or Float32, D>` | Backed by a mapped buffer slice |
+| `embedding` | `FixedSizeList<Float32, D>` | Backed by a mapped buffer slice; `D = 4` for the reference backend |
+
+Embeddings are deterministic: the first four logits produced by
+`Backend::forward(&[token_id])` are L2-normalised (`f64` accumulator, stored as
+`Float32`). A non-finite or zero-norm result falls back to a token-derived unit
+vector. `GetFlightInfo` and `DoGet` report the stored embed response schema,
+not the generate response schema.
 
 ### `kv.blocks`
 
@@ -81,33 +98,48 @@ gRPC with no JSON conversion and no payload copies. HTTP/OpenAI remains the comp
 6. Schema changes are additive within a major version; the schema hash is reported in
    `quarrel_build_info{arrow_schema=...}`.
 
-## Example (Python Agent, Phase 4)
+## Round-trip usage (Python Agent)
+
+The SDK in `pythonsdk/` performs the `DoPut` → `DoGet` round trip for both
+paths. See `pythonsdk/examples/agent_example.ipynb` for a notebook walkthrough.
+
+```python
+from quarrel_flight import QuarrelFlightClient, schema_hash, GENERATE_REQUEST_SCHEMA
+
+with QuarrelFlightClient("grpc://localhost:50051") as client:
+    health = client.health()                 # DoAction /quarrel/v1/health
+    assert health["schemas"]["generate_request"] == schema_hash(GENERATE_REQUEST_SCHEMA)
+
+    # DoPut /quarrel/v1/generate, then DoGet with ticket b"agent-1".
+    for row in client.generate("agent-1", [128000, 271], max_tokens=32):
+        print(row["sequence"], row["token_id"], row["logprob"], row["finished"])
+
+    # DoPut /quarrel/v1/embed, then DoGet with ticket b"agent-1-vectors".
+    for row in client.embed("agent-1-vectors", [128000, 271, 42]):
+        print(row["token_id"], row["embedding"])  # 4 floats, unit length
+```
+
+The raw wire exchange is the same one the SDK performs:
 
 ```python
 import pyarrow as pa
 from pyarrow import flight
+from quarrel_flight import EMBED_REQUEST_SCHEMA, embed_request_columns, embed_response_schema
 
-schema = pa.schema([
-    ("request_id", pa.string()),
-    ("sequence", pa.uint64()),
-    ("token_ids", pa.list_(pa.int32())),
-    ("max_tokens", pa.uint32()),
-    ("temperature", pa.float32()),
-    ("top_p", pa.float32()),
-    ("top_k", pa.uint32()),
-    ("stop_token_ids", pa.list_(pa.int32())),
-    ("stream", pa.bool_()),
-])
-
-batch = pa.record_batch(
-    [["agent-1"], [0], [[128000, 271]], [64], [0.8], [0.95], [40], [[]], [True]],
-    schema=schema,
-)
-
+batch = EMBED_REQUEST_SCHEMA.record_batch(embed_request_columns("agent-1-vectors", [271]))
 with flight.FlightClient("grpc://localhost:50051") as client:
     writer, _ = client.do_put(
-        flight.FlightDescriptor.for_path("/quarrel/v1/generate"), schema
+        flight.FlightDescriptor.for_path("/quarrel/v1/embed"),
+        EMBED_REQUEST_SCHEMA.to_pyarrow(),
     )
     writer.write_batch(batch)
     writer.close()
+
+    reader = client.do_get(flight.Ticket(b"agent-1-vectors"))
+    table = reader.read_all()  # schema equals embed_response_schema().to_pyarrow()
 ```
+
+`DoPut` returns `PutResult.app_metadata` with the comma-separated request ids
+that were enqueued. `GetFlightInfo` on a descriptor path of
+`/quarrel/v1/{generate,embed}/<request_id>` returns the matching response
+schema, endpoint ticket and queued batch count.

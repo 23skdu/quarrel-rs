@@ -111,11 +111,7 @@ impl Metrics {
     /// Returns an error when the recorder cannot be built or installed (for example when another
     /// recorder has already been installed in the process).
     pub fn install() -> Result<Self, metrics_exporter_prometheus::BuildError> {
-        let handle = PrometheusBuilder::new()
-            .set_buckets(&[
-                0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-            ])?
-            .install_recorder()?;
+        let handle = Self::builder()?.install_recorder()?;
 
         metrics::gauge!(BUILD_INFO,
             "version" => env!("CARGO_PKG_VERSION").to_owned(),
@@ -125,6 +121,29 @@ impl Metrics {
         metrics::gauge!(PROCESS_RSS).set(rss_bytes());
 
         Ok(Self { handle })
+    }
+
+    /// Build a recorder handle without installing a process-global recorder.
+    ///
+    /// This exists for isolated test binaries (such as the leak gate) that need a real [`Metrics`]
+    /// value to build application state but must not touch the global metrics registry. The
+    /// returned handle owns its recorder, so it can be cloned and dropped like the installed one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the recorder cannot be built.
+    #[doc(hidden)]
+    pub fn detached() -> Result<Self, metrics_exporter_prometheus::BuildError> {
+        let recorder = Self::builder()?.build_recorder();
+        Ok(Self {
+            handle: recorder.handle(),
+        })
+    }
+
+    fn builder() -> Result<PrometheusBuilder, metrics_exporter_prometheus::BuildError> {
+        PrometheusBuilder::new().set_buckets(&[
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+        ])
     }
 
     /// Record one completed HTTP request.

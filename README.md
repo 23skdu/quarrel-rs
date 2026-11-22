@@ -22,11 +22,14 @@ Apache Arrow based inference engine in Rust — a clean-room rewrite of
 - Helm chart with deployment, service, model PVC, GPU resources, probes, NetworkPolicy, HPA,
   ServiceMonitor and PrometheusRule.
 - Reproducible CPU, CUDA-base and distroless container images ([containers](docs/containers.md)).
-- `quarrel-core` (typed IDs, config, resolver, chat templates), `quarrel-simd` (runtime-dispatched
-  kernels), `quarrel-gguf` (GGUF v1–v3, mmap-backed tensor views, quant kernels), `quarrel-engine`
-  (sampler, KV/prefix caches, reference backend) and `quarrel-flight` (Arrow schemas, adapters and
-  tonic Flight service).
+- `quarrel-core` (typed IDs, config, universal resolver, chat templates), `quarrel-simd`
+  (runtime-dispatched kernels), `quarrel-gguf` (GGUF v1–v3, mmap-backed tensor views, quant kernels),
+  `quarrel-engine` (scheduler, block-table KV, radix prefix cache, sampler, reference backend) and
+  `quarrel-flight` (Arrow schemas, adapters, tonic Flight service and generate/embed paths).
+- `pythonsdk/`: `pyarrow.flight` client with generate/embed round trips, health action and a notebook
+  example, verified against the local Flight example server.
 - Developer tooling: `make tools`, `make makehooks` (unit-test pre-commit hook), `make ci`.
+  Local `make ci` is authoritative in this environment; remote GitHub CI is disabled.
 - Reproducible quality/performance checks via the Go `benchtool` and `scripts/bench.py`
   (see [performance](docs/performance.md) and [test plan](docs/testplan.md)).
 
@@ -59,18 +62,20 @@ Place `.gguf` models in `./models/` (mounted read-only into the container and ch
 | Embedded WebUI | `/` | Implemented (self-contained HTML, no CDN) |
 | Ollama compatibility | `/api/generate`, `/api/chat` | Implemented with NDJSON streaming on the reference backend |
 | Prometheus | `/metrics` | Implemented (control-plane metrics; §7 names contract-checked) |
-| Arrow Flight (gRPC) | `/quarrel/v1/*` | Implemented; schemas in [api/flight-schema.md](api/flight-schema.md) |
+| Arrow Flight (gRPC) | `/quarrel/v1/generate`, `/quarrel/v1/embed`, `/quarrel/v1/health` | Implemented; schemas in [api/flight-schema.md](api/flight-schema.md), client in [pythonsdk](pythonsdk/README.md) |
 
 ## Layout
 
 ```text
 crates/quarrel-server/   bootstrap control plane (later split into the crates in the roadmap)
 api/                     Arrow Flight schema + generated OpenAPI document
+pythonsdk/               pyarrow.flight client, schema specs, examples and tests
 cmd/benchtool/           Go runner for quality/performance checks
 config/benchtool/        JSON profiles consumed by benchtool
 deploy/                  Prometheus rules and Grafana provisioning/dashboard
 helm/quarrel/            Kubernetes chart
 scripts/                 pre-commit hook, bench.py driver and helpers
+docs/README.md           documentation index and local validation model
 docs/roadmap.md          phased rewrite plan, parity matrix and quality gates
 docs/architecture.md     Rust package graph and model/inference/switching flows
 docs/gates.md            CI/CD gate reference
@@ -82,6 +87,7 @@ docs/testplan.md         master test plan and benchtool usage
 
 ## Links
 
+- [Documentation index](docs/README.md)
 - [Technical roadmap](docs/roadmap.md)
 - [Architecture and package graph](docs/architecture.md)
 - [CI/CD gates](docs/gates.md)
@@ -90,5 +96,6 @@ docs/testplan.md         master test plan and benchtool usage
 - [Performance testing](docs/performance.md)
 - [Test plan](docs/testplan.md)
 - [Arrow Flight contract](api/flight-schema.md)
+- [Python Flight SDK](pythonsdk/README.md)
 - [Upstream Go engine](https://github.com/23skdu/longbow-quarrel)
 - [Rust API guidelines](https://rust-lang.github.io/api-guidelines/)

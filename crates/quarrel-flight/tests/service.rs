@@ -2,18 +2,21 @@
 
 use std::sync::Arc;
 
-use arrow::array::UInt64Array;
+use arrow::array::{Int32Array, StringArray, UInt64Array};
+use arrow::record_batch::RecordBatch;
 use arrow_flight::{
-    Action, Criteria, FlightClient, FlightDescriptor, Ticket, encode::FlightDataEncoderBuilder,
-    flight_service_server::FlightService as _,
+    Action, Criteria, FlightClient, FlightData, FlightDescriptor, FlightInfo, Ticket,
+    encode::FlightDataEncoderBuilder, flight_service_server::FlightService as _,
 };
 use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use quarrel_core::{GenerateRequest, ModelId, RequestId, SamplingParams};
 use quarrel_engine::backend::{Backend, ReferenceBackend, generate};
 use quarrel_flight::{
-    DEFAULT_QUEUE_DEPTH, GENERATE_PATH, HEALTH_ACTION, QuarrelFlightService, decode_finished,
-    decode_generate_request, decode_generate_response, encode_generate_request, flight_server,
+    DEFAULT_QUEUE_DEPTH, EMBED_PATH, GENERATE_PATH, HEALTH_ACTION, QuarrelFlightService,
+    decode_embedding, decode_finished, decode_generate_request, decode_generate_response,
+    embed_request_schema, embed_response_schema, encode_embed_request, encode_generate_request,
+    flight_server, generate_response_schema, schema_hash,
 };
 use tonic::Request;
 
@@ -181,6 +184,242 @@ async fn service_rejects_unknown_ticket() {
         .do_get(Request::new(Ticket::new("no-such-request")))
         .await;
     assert!(result.is_err());
+}
+
+/// Expected server embedding: first four backend logits, L2-normalised in f64.
+fn expected_embedding(token_id: i32) -> Vec<f32> {
+    let logits: Vec<f32> = ReferenceBackend::new()
+        .forward(&[token_id])
+        .unwrap()
+        .into_iter()
+        .take(4)
+        .collect();
+    let norm = logits
+        .iter()
+        .fold(0.0f64, |sum, value| {
+            sum + f64::from(*value) * f64::from(*value)
+        })
+        .sqrt();
+    logits
+        .iter()
+        .map(|value| (f64::from(*value) / norm) as f32)
+        .collect()
+}
+
+fn uploads(
+    batch: RecordBatch,
+    path: &str,
+) -> impl futures::Stream<Item = Result<FlightData, arrow_flight::error::FlightError>> + Send {
+    let descriptor = FlightDescriptor::new_path(vec![path.to_owned()]);
+    FlightDataEncoderBuilder::new()
+        .with_flight_descriptor(Some(descriptor))
+        .build(futures::stream::iter(vec![Ok(batch)]))
+}
+
+async fn spawn_server(service: QuarrelFlightService) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let incoming = async_stream::stream! {
+            loop {
+                match listener.accept().await {
+                    Ok((socket, _)) => yield Ok::<_, std::io::Error>(socket),
+                    Err(err) => {
+                        yield Err(err);
+                        break;
+                    }
+                }
+            }
+        };
+        tonic::transport::Server::builder()
+            .add_service(flight_server(service))
+            .serve_with_incoming(incoming)
+            .await
+            .unwrap();
+    });
+    (address.to_string(), server)
+}
+
+#[tokio::test]
+async fn embed_do_put_do_get_round_trip() {
+    let service = QuarrelFlightService::default();
+    let state = service.clone();
+    let (address, server) = spawn_server(service).await;
+    let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    let mut client = FlightClient::new(channel);
+
+    let id = "agent-embed-1";
+    let tokens = [11, -7, 42];
+    let batch = RecordBatch::try_new(
+        embed_request_schema(),
+        vec![
+            Arc::new(StringArray::from(vec![id; tokens.len()])),
+            Arc::new(Int32Array::from(tokens.to_vec())),
+        ],
+    )
+    .unwrap();
+    let mut put_results = client.do_put(uploads(batch, EMBED_PATH)).await.unwrap();
+    let result = put_results.next().await.unwrap().unwrap();
+    assert_eq!(String::from_utf8(result.app_metadata.to_vec()).unwrap(), id);
+    assert_eq!(state.active_requests(), vec![id.to_owned()]);
+    assert_eq!(state.queued_batches(id), tokens.len());
+
+    let descriptor = FlightDescriptor::new_path(vec![EMBED_PATH.to_owned(), id.to_owned()]);
+    let info = state
+        .get_flight_info(Request::new(descriptor.clone()))
+        .await
+        .unwrap()
+        .into_inner();
+    let expected_schema = FlightInfo::new()
+        .try_with_schema(embed_response_schema().as_ref())
+        .unwrap()
+        .schema;
+    assert_eq!(info.schema, expected_schema);
+    assert_eq!(info.flight_descriptor, Some(descriptor));
+    assert_eq!(info.total_records, i64::try_from(tokens.len()).unwrap());
+
+    let stream = client.do_get(Ticket::new(id)).await.unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
+    assert_eq!(batches.len(), tokens.len());
+    for (batch, token) in batches.iter().zip(tokens) {
+        assert_eq!(batch.schema(), embed_response_schema());
+        let (request_id, token_id, values) = decode_embedding(batch).unwrap();
+        assert_eq!(request_id, id);
+        assert_eq!(token_id, token);
+        assert_eq!(values.len(), 4);
+        for (actual, expected) in values.iter().zip(expected_embedding(token)) {
+            assert!((actual - expected).abs() < 1e-6, "{actual} vs {expected}");
+        }
+        let norm: f64 = values
+            .iter()
+            .fold(0.0, |sum, value| {
+                sum + f64::from(*value) * f64::from(*value)
+            })
+            .sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
+    }
+
+    // The generate path still uses its own response schema.
+    let generate_info = state
+        .get_flight_info(Request::new(FlightDescriptor::new_path(vec![
+            GENERATE_PATH.to_owned(),
+            "missing-generate".to_owned(),
+        ])))
+        .await;
+    assert!(generate_info.is_err());
+    assert_ne!(
+        schema_hash(&embed_response_schema()),
+        schema_hash(&generate_response_schema())
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn embed_round_trip_over_tonic_flight_client() {
+    let service = QuarrelFlightService::default();
+    let (address, server) = spawn_server(service).await;
+    let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    let mut client = FlightClient::new(channel);
+
+    let id = "agent-embed-grpc";
+    let batch = encode_embed_request(&RequestId::new(id).unwrap(), 271).unwrap();
+    let mut put_results = client.do_put(uploads(batch, EMBED_PATH)).await.unwrap();
+    let put = put_results.next().await.unwrap().unwrap();
+    assert_eq!(String::from_utf8(put.app_metadata.to_vec()).unwrap(), id);
+
+    let stream = client.do_get(Ticket::new(id)).await.unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].schema(), embed_response_schema());
+    let (request_id, token_id, values) = decode_embedding(&batches[0]).unwrap();
+    assert_eq!(request_id, id);
+    assert_eq!(token_id, 271);
+    let expected = expected_embedding(271);
+    for (actual, expected) in values.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
+    server.abort();
+}
+
+fn assert_tonic_code(error: arrow_flight::error::FlightError, expected: tonic::Code) {
+    match error {
+        arrow_flight::error::FlightError::Tonic(status) => assert_eq!(status.code(), expected),
+        other => panic!("unexpected Flight client error: {other}"),
+    }
+}
+
+#[tokio::test]
+async fn embed_error_paths_return_typed_statuses() {
+    let service = QuarrelFlightService::default();
+    let (address, server) = spawn_server(service.clone()).await;
+    let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    let mut client = FlightClient::new(channel);
+
+    let id = RequestId::new("agent-embed-bad").unwrap();
+    match client
+        .do_put(uploads(
+            encode_embed_request(&id, 1).unwrap(),
+            "/quarrel/v1/unknown",
+        ))
+        .await
+    {
+        Err(error) => assert_tonic_code(error, tonic::Code::Unimplemented),
+        Ok(_) => panic!("unsupported descriptor was accepted"),
+    }
+
+    // A generate batch sent to the embed path fails the exact-schema check.
+    match client
+        .do_put(uploads(
+            encode_generate_request(&request("agent-embed-wrong-schema")).unwrap(),
+            EMBED_PATH,
+        ))
+        .await
+    {
+        Err(error) => assert_tonic_code(error, tonic::Code::FailedPrecondition),
+        Ok(_) => panic!("generate batch was accepted on the embed path"),
+    }
+
+    let empty_id = RecordBatch::try_new(
+        embed_request_schema(),
+        vec![
+            Arc::new(StringArray::from(vec![""])),
+            Arc::new(Int32Array::from(vec![1])),
+        ],
+    )
+    .unwrap();
+    match client.do_put(uploads(empty_id, EMBED_PATH)).await {
+        Err(error) => assert_tonic_code(error, tonic::Code::InvalidArgument),
+        Ok(_) => panic!("empty request id was accepted"),
+    }
+
+    assert!(
+        service
+            .do_get(Request::new(Ticket::new("no-such-embed")))
+            .await
+            .is_err()
+    );
+    assert!(
+        service
+            .get_flight_info(Request::new(FlightDescriptor::new_path(vec![
+                EMBED_PATH.to_owned(),
+                "no-such-embed".to_owned(),
+            ])))
+            .await
+            .is_err()
+    );
+    server.abort();
 }
 
 #[test]

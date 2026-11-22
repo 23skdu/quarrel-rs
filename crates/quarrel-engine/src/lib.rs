@@ -4,7 +4,8 @@
 //! depending on a particular model implementation:
 //!
 //! * [`sampler`] — deterministic, parameter-driven token sampling.
-//! * [`kv`] — bounded paged KV caches and an LRU radix prefix cache.
+//! * [`kv`] — bounded paged KV caches, block tables and an LRU radix prefix tree.
+//! * [`scheduler`] — deterministic iteration-level continuous batching.
 //! * [`health`] — lightweight logit sanity auditing.
 //! * [`backend`] — the [`backend::Backend`] trait, a deterministic reference
 //!   backend and a small `generate` driver.
@@ -25,6 +26,7 @@ pub mod backend;
 pub mod health;
 pub mod kv;
 pub mod sampler;
+pub mod scheduler;
 
 /// Converts a numeric field into `usize` without assuming a particular
 /// integer width in `quarrel-core`.
@@ -85,6 +87,22 @@ pub enum EngineError {
         /// Number of tokens the caller asked to remove.
         requested: usize,
         /// Number of tokens actually available.
+        available: usize,
+    },
+    /// A bounded scheduler queue cannot accept another request.
+    #[error("scheduler queue is full (depth {depth}, capacity {capacity})")]
+    QueueFull {
+        /// Current number of waiting requests.
+        depth: usize,
+        /// Maximum number of waiting requests.
+        capacity: usize,
+    },
+    /// A shared-prefix request extended past the source sequence.
+    #[error("cannot share {requested} prefix tokens from a sequence holding {available}")]
+    InvalidPrefixLength {
+        /// Number of prefix tokens the caller requested.
+        requested: usize,
+        /// Number of tokens available in the source sequence.
         available: usize,
     },
     /// A paged cache invariant was violated internally.

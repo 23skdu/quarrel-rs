@@ -18,7 +18,10 @@ use arrow::{
 };
 use quarrel_core::{GenerateRequest, KvBlock, KvDtype, ModelId, RequestId, SamplingParams, Token};
 
-use crate::{FlightError, generate_request_schema, generate_response_schema, schema_hash};
+use crate::{
+    FlightError, embed_request_schema, generate_request_schema, generate_response_schema,
+    schema_hash,
+};
 
 /// Model reported for decoded requests whose batch does not carry a model
 /// column (the Flight contract has no such column).
@@ -687,6 +690,71 @@ pub fn decode_embedding(batch: &RecordBatch) -> Result<(String, i32, Vec<f32>), 
     let token_id = scalar_i32(batch, "token_id", 0)?;
     let values = embedding_values(batch)?;
     Ok((request_id, token_id, values.to_vec()))
+}
+
+/// Encode an embed request as a single-row batch.
+///
+/// The batch uses [`crate::embed_request_schema`], the request side of the
+/// `/quarrel/v1/embed` contract.
+pub fn encode_embed_request(
+    request_id: &RequestId,
+    token_id: i32,
+) -> Result<RecordBatch, FlightError> {
+    let mut request_ids = StringBuilder::new();
+    let mut token_ids = Int32Builder::new();
+    request_ids.append_value(request_id.as_str());
+    token_ids.append_value(token_id);
+    Ok(RecordBatch::try_new(
+        embed_request_schema(),
+        vec![Arc::new(request_ids.finish()), Arc::new(token_ids.finish())],
+    )?)
+}
+
+/// Decode a single-row embed request batch into `(request_id, token_id)`.
+///
+/// The full batch schema must match [`crate::embed_request_schema`]; rows with
+/// null or invalid identifiers are rejected with a typed [`FlightError`].
+pub fn decode_embed_request(batch: &RecordBatch) -> Result<(RequestId, i32), FlightError> {
+    check_row_count(batch)?;
+    let mut rows = decode_embed_request_rows(batch)?;
+    rows.pop()
+        .ok_or_else(|| FlightError::InvalidArgument("embed request has no rows".into()))
+}
+
+/// Decode every row of an embed request batch into `(request_id, token_id)` pairs.
+///
+/// Unlike [`decode_embed_request`], batches with any number of rows are
+/// accepted. The column types and field order must still match the canonical
+/// embed-request schema.
+pub fn decode_embed_request_rows(
+    batch: &RecordBatch,
+) -> Result<Vec<(RequestId, i32)>, FlightError> {
+    let expected = embed_request_schema();
+    if schema_hash(&batch.schema()) != schema_hash(&expected) {
+        return Err(FlightError::SchemaMismatch {
+            expected: schema_hash(&expected),
+            actual: schema_hash(&batch.schema()),
+        });
+    }
+    let request_ids = array_column::<StringArray>(batch, "request_id")?;
+    let token_ids = array_column::<Int32Array>(batch, "token_id")?;
+    let mut rows = Vec::with_capacity(batch.num_rows());
+    for row in 0..batch.num_rows() {
+        if request_ids.is_null(row) {
+            return Err(FlightError::InvalidArgument(format!(
+                "missing value for request_id at row {row}"
+            )));
+        }
+        if token_ids.is_null(row) {
+            return Err(FlightError::InvalidArgument(format!(
+                "missing value for token_id at row {row}"
+            )));
+        }
+        let request_id = RequestId::new(request_ids.value(row))
+            .map_err(|err| FlightError::InvalidArgument(err.to_string()))?;
+        rows.push((request_id, token_ids.value(row)));
+    }
+    Ok(rows)
 }
 
 /// Return the embedding-response schema for a specific vector width.

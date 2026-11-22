@@ -4,8 +4,9 @@
 //! it never panics on untrusted input. [`GgufFile`] parses bytes borrowed from
 //! any source, while [`GgufMmap`] owns a read-only memory map of a file on disk.
 //! [`matvec`] exposes allocation-free row-wise matrix-vector products for
-//! F32, F16, BF16, Q8_0 and Q4_0 weights; K-quant formats report a typed
-//! [`GgufError::UnsupportedDType`] rather than an invented layout.
+//! F32, F16, BF16, Q8_0, Q4_0 and all five K-quant formats (Q2_K, Q3_K,
+//! Q4_K, Q5_K, Q6_K), using the canonical ggml block layouts. Unknown dtype
+//! ids still report a typed [`GgufError::UnsupportedDType`].
 //!
 //! ```
 //! use quarrel_gguf::{DType, GgufFile, quant};

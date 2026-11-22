@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use arrow::record_batch::RecordBatch;
+use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use arrow_flight::{
     Action, ActionType, Criteria, Empty, FlightData, FlightDescriptor, FlightEndpoint, FlightInfo,
     HandshakeResponse, PollInfo, PutResult, SchemaResult, Ticket, encode::FlightDataEncoderBuilder,
@@ -19,12 +19,16 @@ use quarrel_engine::backend::{Backend, ReferenceBackend, generate};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    FlightError, GenerateResponseBuilder, decode_generate_request_view, generate_response_schema,
-    record_batch_stream, schema_hash,
+    DEFAULT_EMBEDDING_DIM, FlightError, GenerateResponseBuilder, decode_embed_request_rows,
+    decode_generate_request_view, embedding_response_schema_for, encode_embedding,
+    generate_response_schema, record_batch_stream, schema_hash,
 };
 
 /// Descriptor path used for generation requests.
 pub const GENERATE_PATH: &str = "/quarrel/v1/generate";
+
+/// Descriptor path used for embedding requests.
+pub const EMBED_PATH: &str = "/quarrel/v1/embed";
 
 /// Health action path.
 pub const HEALTH_ACTION: &str = "/quarrel/v1/health";
@@ -41,6 +45,11 @@ type HandshakeStream = Pin<Box<dyn Stream<Item = Result<HandshakeResponse, Statu
 #[derive(Debug, Clone)]
 struct RequestState {
     batches: Vec<RecordBatch>,
+    /// Response schema stored alongside the batches so `DoGet` and
+    /// `GetFlightInfo` describe generate and embed responses correctly.
+    schema: SchemaRef,
+    /// Descriptor path of the request that produced the batches.
+    path: &'static str,
 }
 
 struct Inner {
@@ -51,9 +60,10 @@ struct Inner {
 
 /// An Arrow Flight service with in-memory, request-keyed response queues.
 ///
-/// `DoPut` accepts a generate-request batch, runs the configured backend and
-/// stores the resulting token batches. `DoGet` streams those batches back to
-/// the agent using the request id as the ticket.
+/// `DoPut` accepts generate-request batches at [`GENERATE_PATH`] and
+/// embed-request batches at [`EMBED_PATH`]. Both run the configured backend and
+/// store the resulting response batches with their own Arrow schema. `DoGet`
+/// streams those batches back to the agent using the request id as the ticket.
 #[derive(Clone)]
 pub struct QuarrelFlightService {
     inner: Arc<Inner>,
@@ -141,19 +151,157 @@ impl QuarrelFlightService {
     }
 
     fn describe(&self, request_id: &str) -> FlightInfo {
-        let schema = generate_response_schema();
-        let queued = self.queued_batches(request_id);
+        let state = self
+            .lock_requests()
+            .get(request_id)
+            .cloned()
+            .unwrap_or_else(|| RequestState {
+                batches: Vec::new(),
+                schema: generate_response_schema(),
+                path: GENERATE_PATH,
+            });
+        self.describe_state(request_id, &state)
+    }
+
+    fn describe_state(&self, request_id: &str, state: &RequestState) -> FlightInfo {
+        let queued = state.batches.len();
         let mut info = FlightInfo::new()
-            .try_with_schema(schema.as_ref())
+            .try_with_schema(state.schema.as_ref())
             .expect("response schema is encodable")
             .with_descriptor(FlightDescriptor::new_path(vec![
-                GENERATE_PATH.to_owned(),
+                state.path.to_owned(),
                 request_id.to_owned(),
             ]))
             .with_endpoint(FlightEndpoint::new().with_ticket(Ticket::new(request_id.to_owned())))
             .with_total_records(i64::try_from(queued).unwrap_or(-1));
         info.ordered = true;
         info
+    }
+
+    /// Derive the canonical 4-dimensional embedding for one token.
+    ///
+    /// The first `DEFAULT_EMBEDDING_DIM` logits from the backend are copied into
+    /// a vector and L2-normalised. A non-finite or zero norm falls back to a
+    /// deterministic one-hot vector selected by the token id.
+    fn embed_token(&self, token_id: i32) -> Result<Vec<f32>, FlightError> {
+        let logits = self
+            .inner
+            .backend
+            .forward(&[token_id])
+            .map_err(|err| FlightError::Engine(err.to_string()))?;
+        let dim = usize::try_from(DEFAULT_EMBEDDING_DIM).unwrap_or(4);
+        let mut vector = vec![0.0f32; dim];
+        for (slot, value) in vector.iter_mut().zip(logits.iter()) {
+            *slot = *value;
+        }
+        let norm_squared = vector.iter().fold(0.0f64, |sum, value| {
+            sum + f64::from(*value) * f64::from(*value)
+        });
+        let norm = norm_squared.sqrt();
+        if !norm.is_finite() || norm <= 0.0 {
+            let index = token_id
+                .rem_euclid(DEFAULT_EMBEDDING_DIM)
+                .clamp(0, DEFAULT_EMBEDDING_DIM - 1) as usize;
+            vector.fill(0.0);
+            if let Some(slot) = vector.get_mut(index) {
+                *slot = 1.0;
+            }
+            return Ok(vector);
+        }
+        for value in &mut vector {
+            *value = (f64::from(*value) / norm) as f32;
+        }
+        Ok(vector)
+    }
+
+    fn enqueue_generate(&self, batches: Vec<RecordBatch>) -> Result<Vec<String>, Status> {
+        let mut enqueued = Vec::new();
+        for batch in batches {
+            let decoded = decode_generate_request_view(&batch).map_err(FlightError::to_status)?;
+            let request_id = decoded.request_id.as_str().to_owned();
+            // The prompt is borrowed directly from the Arrow buffer; no token
+            // vector is copied on the request path.
+            let tokens: Vec<Token> = generate(
+                self.inner.backend.as_ref(),
+                decoded.token_ids,
+                &decoded.params,
+                deterministic_seed(&request_id),
+                self.inner.queue_depth,
+            )
+            .map_err(|err| FlightError::Engine(err.to_string()))?
+            .into_iter()
+            .take(self.inner.queue_depth)
+            .collect();
+
+            if tokens.is_empty() {
+                return Err(Status::invalid_argument(
+                    "backend produced no tokens for request",
+                ));
+            }
+            let total = tokens.len();
+            let mut builder = GenerateResponseBuilder::new().map_err(FlightError::to_status)?;
+            let responses = tokens
+                .into_iter()
+                .enumerate()
+                .map(|(index, token)| {
+                    builder
+                        .encode(
+                            &decoded.request_id,
+                            u64::try_from(index + 1).unwrap_or(u64::MAX),
+                            &token,
+                            index + 1 == total,
+                        )
+                        .map_err(FlightError::to_status)
+                })
+                .collect::<Result<Vec<_>, Status>>()?;
+            self.lock_requests().insert(
+                request_id.clone(),
+                RequestState {
+                    batches: responses,
+                    schema: generate_response_schema(),
+                    path: GENERATE_PATH,
+                },
+            );
+            enqueued.push(request_id);
+        }
+        Ok(enqueued)
+    }
+
+    fn enqueue_embed(&self, batches: Vec<RecordBatch>) -> Result<Vec<String>, Status> {
+        let mut enqueued = Vec::new();
+        for batch in batches {
+            let rows = decode_embed_request_rows(&batch).map_err(FlightError::to_status)?;
+            if rows.is_empty() {
+                return Err(Status::invalid_argument("embed request has no rows"));
+            }
+            // Group by request id while preserving first-seen order so the
+            // DoPut result metadata is deterministic.
+            let mut grouped: Vec<(String, Vec<RecordBatch>)> = Vec::new();
+            for (request_id, token_id) in rows {
+                let embedding = self.embed_token(token_id).map_err(FlightError::to_status)?;
+                let response = encode_embedding(&request_id, token_id, &embedding)
+                    .map_err(FlightError::to_status)?;
+                let id = request_id.as_str().to_owned();
+                match grouped.iter_mut().find(|(existing, _)| existing == &id) {
+                    Some((_, responses)) => responses.push(response),
+                    None => grouped.push((id, vec![response])),
+                }
+            }
+            let schema =
+                embedding_response_schema_for(usize::try_from(DEFAULT_EMBEDDING_DIM).unwrap_or(4));
+            for (request_id, responses) in grouped {
+                self.lock_requests().insert(
+                    request_id.clone(),
+                    RequestState {
+                        batches: responses,
+                        schema: schema.clone(),
+                        path: EMBED_PATH,
+                    },
+                );
+                enqueued.push(request_id);
+            }
+        }
+        Ok(enqueued)
     }
 }
 
@@ -171,7 +319,7 @@ fn push_json_string(out: &mut String, value: &str) {
 fn request_id_from_descriptor(descriptor: &FlightDescriptor) -> Option<String> {
     if !descriptor.path.is_empty() {
         let last = descriptor.path.last()?;
-        if last == GENERATE_PATH {
+        if last == GENERATE_PATH || last == EMBED_PATH {
             return None;
         }
         return Some(last.clone());
@@ -253,17 +401,17 @@ impl FlightService for QuarrelFlightService {
     ) -> Result<Response<Self::DoGetStream>, Status> {
         let request_id = String::from_utf8(request.into_inner().ticket.to_vec())
             .map_err(|_| Status::invalid_argument("ticket must be a UTF-8 request id"))?;
-        let batches = self
+        let state = self
             .lock_requests()
             .get(&request_id)
-            .map(|state| state.batches.clone())
+            .cloned()
             .ok_or_else(|| Status::not_found(format!("unknown request: {request_id}")))?;
 
         // Move the batch vector into a RecordBatchStream; Arrow payload buffers
         // stay shared and are not copied before the Flight encoder sees them.
-        let input = record_batch_stream(batches).map(Ok);
+        let input = record_batch_stream(state.batches).map(Ok);
         let encoded = FlightDataEncoderBuilder::new()
-            .with_schema(generate_response_schema())
+            .with_schema(state.schema)
             .build(input)
             .map(|result| result.map_err(Status::from));
         Ok(Response::new(Box::pin(encoded)))
@@ -282,58 +430,24 @@ impl FlightService for QuarrelFlightService {
             .first()
             .and_then(|frame| frame.flight_descriptor.clone())
             .ok_or_else(|| Status::invalid_argument("DoPut stream has no descriptor"))?;
-        if !descriptor.path.is_empty() && descriptor.path[0] != GENERATE_PATH {
-            return Err(Status::unimplemented(format!(
-                "unsupported descriptor: {}",
-                descriptor.path.join("/")
-            )));
-        }
-
-        let batches = utils::flight_data_to_batches(&frames)
-            .map_err(|err| FlightError::Transport(err.to_string()))?;
-        let mut enqueued = Vec::new();
-        for batch in batches {
-            let decoded = decode_generate_request_view(&batch).map_err(FlightError::to_status)?;
-            let request_id = decoded.request_id.as_str().to_owned();
-            // The prompt is borrowed directly from the Arrow buffer; no token
-            // vector is copied on the request path.
-            let tokens: Vec<Token> = generate(
-                self.inner.backend.as_ref(),
-                decoded.token_ids,
-                &decoded.params,
-                deterministic_seed(&request_id),
-                self.inner.queue_depth,
-            )
-            .map_err(|err| FlightError::Engine(err.to_string()))?
-            .into_iter()
-            .take(self.inner.queue_depth)
-            .collect();
-
-            if tokens.is_empty() {
-                return Err(Status::invalid_argument(
-                    "backend produced no tokens for request",
-                ));
+        let path = descriptor.path.first().map(String::as_str);
+        let enqueued = match path {
+            None | Some(GENERATE_PATH) => {
+                let batches = utils::flight_data_to_batches(&frames)
+                    .map_err(|err| FlightError::Transport(err.to_string()))?;
+                self.enqueue_generate(batches)?
             }
-            let total = tokens.len();
-            let mut builder = GenerateResponseBuilder::new().map_err(FlightError::to_status)?;
-            let responses = tokens
-                .into_iter()
-                .enumerate()
-                .map(|(index, token)| {
-                    builder
-                        .encode(
-                            &decoded.request_id,
-                            u64::try_from(index + 1).unwrap_or(u64::MAX),
-                            &token,
-                            index + 1 == total,
-                        )
-                        .map_err(FlightError::to_status)
-                })
-                .collect::<Result<Vec<_>, Status>>()?;
-            self.lock_requests()
-                .insert(request_id.clone(), RequestState { batches: responses });
-            enqueued.push(request_id);
-        }
+            Some(EMBED_PATH) => {
+                let batches = utils::flight_data_to_batches(&frames)
+                    .map_err(|err| FlightError::Transport(err.to_string()))?;
+                self.enqueue_embed(batches)?
+            }
+            Some(other) => {
+                return Err(Status::unimplemented(format!(
+                    "unsupported descriptor: {other}"
+                )));
+            }
+        };
 
         let metadata = enqueued.join(",");
         let results = async_stream::stream! {

@@ -2,10 +2,11 @@
 
 > **Status:** Phase 0 is implemented; the Phase 1–4 library crates are complete with unit and
 > property tests. Fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) pass 60 s runs. The
-> OpenAI/OpenAPI HTTP plane, embedded WebUI, Ollama shims, Flight streaming/pooling, metric contract
-> and container/Helm/deployment variants are live on the deterministic reference backend. Oracle
-> parity, advanced quant formats, hardware backends and the remaining integration gates stay open
-> until their acceptance criteria pass.
+> OpenAI/OpenAPI HTTP plane, embedded WebUI, Ollama shims, Python Flight SDK with generate/embed,
+> paged KV/batching/radix prefix engine primitives, all quant matvec kernels, Criterion/iai-callgrind
+> baselines, metric contract and container/Helm/deployment variants are live on the deterministic
+> reference backend. Oracle parity, hardware backends, function calling and the remaining integration
+> gates stay open until their acceptance criteria pass.
 > **Goal:** a clean-room Rust rewrite of [`23skdu/longbow-quarrel`](https://github.com/23skdu/longbow-quarrel)
 > that preserves its memory-efficient inference semantics while adding two first-class client planes:
 > an **Arrow Flight (gRPC) zero-copy vector plane for Agents**, and an **OpenAI-compatible HTTP API
@@ -236,9 +237,10 @@ Contract rules:
   string literals scattered across crates.
 - `cargo fmt --check`, `clippy --all-targets --all-features -- -D warnings`, `cargo test`, `cargo nextest`,
   `cargo llvm-cov`, `cargo deny`, `cargo audit`, `cargo mutants`, shellcheck on hooks, `helm lint`,
-  `docker compose config` and OpenAPI drift are all local `make` targets and CI jobs.
+  `docker compose config` and OpenAPI drift are all local `make` targets. Remote GitHub Actions is
+  disabled for this repository; a green local `make ci` is the required evidence.
 - Pre-commit hook (`scripts/pre-commit`, installed by `make makehooks`) always runs **unit tests**
-  plus formatting; heavier gates run in CI. Never use `--no-verify` as a normal workflow.
+  plus formatting; heavier gates run in local `make ci`. Never use `--no-verify` as a normal workflow.
 
 ---
 
@@ -288,7 +290,7 @@ all pass on a clean checkout; `make makehooks && git commit` runs the unit tests
       logits/tokens/KV bytes, and expose `make oracle-gate`.
 - [x] **P1-04** Add `proptest` + `insta` snapshot infrastructure and `cargo-fuzz` targets for GGUF
       parsing, sampling params and Arrow schema decoding.
-- [ ] **P1-05** Establish `criterion` benchmarks and `iai-callgrind` for hot kernels with baselines
+- [x] **P1-05** Establish `criterion` benchmarks and `iai-callgrind` for hot kernels with baselines
       committed under `benches/baselines/`.
 
 **Acceptance:** P1-03 reproduces Go logits within tolerance on three models (Llama 3.2, Qwen 3.5,
@@ -299,12 +301,12 @@ Mistral); fuzz targets run for 60 s without a crash.
 - [x] **P2-01** Parse GGUF v1–v3 headers, KV metadata and tensor descriptors with `zerocopy`-style
       typed views over `&[u8]`; reject truncated/malformed files with typed errors.
 - [x] **P2-02** Memory-map weights with `memmap2`; expose typed tensor views without copying.
-- [ ] **P2-03** Implement zero-copy matvec for FP32, FP16, BF16, Q8_0, Q6_K, Q5_K, Q4_K, Q4_0,
+- [x] **P2-03** Implement zero-copy matvec for FP32, FP16, BF16, Q8_0, Q6_K, Q5_K, Q4_K, Q4_0,
       Q3_K, Q2_K; prove no intermediate `Vec<f32>` with allocator counters.
 - [ ] **P2-04** Port GGUF writer and `quarrel-quantize` CLI (`q4_k`, `q6_k`, `q8_0`, `f16`, `f32`).
 - [x] **P2-05** Port on-demand token embedding lookup (never materialise the vocabulary table).
 - [ ] **P2-06** Validate TurboQuant KV codec (PolarQuant + QJL) against the Go oracle; 8× compression.
-- [ ] **P2-07** Universal model resolver across `~/.cache/llmfit`, llama.cpp, Hugging Face, Ollama
+- [x] **P2-07** Universal model resolver across `~/.cache/llmfit`, llama.cpp, Hugging Face, Ollama
       tags and explicit paths, with fuzzy matching and a resolver unit test per source.
 
 **Acceptance:** 4B Q8_0 model loads with < 20 MB steady-state heap above mapped weights; oracle gate
@@ -314,9 +316,9 @@ green for every supported quant; quantizer output reloads identically.
 
 - [ ] **P3-01** Backend trait: `fn forward(&self, batch: &Batch, kv: &mut KvCache) -> Result<Logits>`;
       CPU implementation behind `quarrel-backend-cpu`.
-- [ ] **P3-02** Continuous batching with iteration-level preemption and bounded queue depth.
-- [ ] **P3-03** Paged KV cache with block tables, per-sequence isolation, rollback and prefix sharing.
-- [ ] **P3-04** Radix-tree prompt prefix cache with LRU eviction and zero-copy prefix reuse.
+- [x] **P3-02** Continuous batching with iteration-level preemption and bounded queue depth.
+- [x] **P3-03** Paged KV cache with block tables, per-sequence isolation, rollback and prefix sharing.
+- [x] **P3-04** Radix-tree prompt prefix cache with LRU eviction and zero-copy prefix reuse.
 - [ ] **P3-05** Sampler: temperature, top-K, top-P, repetition penalty, grammar-constrained PDA.
 - [ ] **P3-06** Dynamic architecture routing for llama/qwen2/qwen35/mistral/gemma4/phi3/smollm2/granite,
       including Qwen 3.5 hybrid SSM + full-attention layers.
@@ -337,7 +339,7 @@ context holds constant VRAM; no data races under `cargo test --release` + `loom`
 - [x] **P4-04** Zero-copy response adapter: pre-sized builders, pooled buffers, `RecordBatchStream`.
 - [x] **P4-05** KV block transfer path with dtype metadata and endianness assertions.
 - [x] **P4-06** Schema-compatibility and drift tests; IPC golden files checked in.
-- [ ] **P4-07** Python client in `pythonsdk/` using `pyarrow.flight` with a notebook-style example.
+- [x] **P4-07** Python client in `pythonsdk/` using `pyarrow.flight` with a notebook-style example.
 - [x] **P4-08** Smoke benchmark: 250k×384 float vectors round-trip with zero payload copies.
 
 **Acceptance:** an external `pyarrow.flight` client generates tokens and embeddings through the exact
@@ -390,7 +392,7 @@ after one generated request; `helm template` renders valid Kubernetes YAML with 
 - [ ] **P8-01** `make accuracy-gate`, `make oracle-gate`, `make fuzz-coverage` (from Go roadmap) ported.
 - [ ] **P8-02** `cargo mutants` on `quarrel-core`, `quarrel-simd` and the sampler: no surviving mutants.
 - [ ] **P8-03** Allocation gate: zero allocations in decode and Flight payload paths after warm-up.
-- [ ] **P8-04** Leak gate: 16 load/search/close cycles with < 5 MB heap growth.
+- [x] **P8-04** Leak gate: 16 load/search/close cycles with < 5 MB heap growth.
 - [ ] **P8-05** CI matrix: stable + MSRV, linux x86_64, linux aarch64, macOS arm64, CUDA job.
 - [x] **P8-06** Pre-commit hook enforced in CI by running `make precommit`.
 
@@ -514,7 +516,7 @@ decode throughput, KV saturation, Flight bytes, layer offload, model load and RS
 | `openapi-check`, `metrics-check` | contract/drift gates |
 | `docker-build`, `docker-up`, `docker-down`, `docker-logs` | local monitoring stack |
 | `helm-lint`, `helm-template` | chart validation |
-| `ci` | the full local gate sequence used by GitHub Actions |
+| `ci` | the full local gate sequence; remote GitHub Actions is disabled here |
 | `clean` | remove build artefacts (`cargo clean`, generated docs, caches) |
 | `distclean` | `clean` plus tool-built caches and local secrets (never tracked files) |
 | `links` | Print upstream/API/monitoring URLs |
@@ -532,7 +534,7 @@ stack, `metrics`/`tracing` and `utoipa` are grouped so compatible versions land 
 
 ### 8.3 Pre-commit hook
 
-`scripts/pre-commit` is a dependency-free Bash script (shellchecked in CI). On every `git commit` it:
+`scripts/pre-commit` is a dependency-free Bash script (shellchecked by local `make shellcheck`). On every `git commit` it:
 
 1. refuses to run if `cargo` is missing, pointing at `make tools`;
 2. runs `cargo fmt --all -- --check` (fast, deterministic);
@@ -541,7 +543,7 @@ stack, `metrics`/`tracing` and `utoipa` are grouped so compatible versions land 
 
 `make makehooks` installs it through `git rev-parse --git-path hooks`, so it also works with git
 worktrees and a custom `core.hooksPath`. Heavier checks (clippy, audit, fuzz, Helm, OpenAPI drift)
-run in `make ci` / GitHub Actions so commits stay fast.
+run in local `make ci` so commits stay fast.
 
 ---
 

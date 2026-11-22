@@ -1,0 +1,2 @@
+# Runtime dependency for quarrel_flight.Client (Arrow IPC + Flight gRPC).
+pyarrow==21.0.0

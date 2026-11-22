@@ -15,7 +15,8 @@ Verify that the Rust rewrite:
 4. is safe, secure, observable and deployable;
 5. has performance numbers that are reproducible and regression-detectable.
 
-In scope: all workspace crates, the fuzz harness, the Go benchtool, the Python driver, container
+In scope: all workspace crates, the fuzz harness, the Go benchtool, the Python driver and Flight
+SDK, container
 images, Helm chart and monitoring assets.
 
 Out of scope for v1.0: multi-GPU tensor parallelism, GPTQ/AWQ/Vulkan/ROCm/WebGPU backends and the
@@ -32,6 +33,8 @@ Python inference rewrite listed in roadmap §1.2.
 | Oracle | Go-recorded logits/tokens/KV bytes | `make oracle-gate` | Yes before release |
 | Mutation | Test-suite strength on core/SIMD/sampler | `make mutants` | Yes before release |
 | Contract | OpenAPI drift, metric-name drift, Arrow IPC golden files | `make openapi-check metrics-check` + crate tests | Yes |
+| Python SDK | Schema specs, request builders and `pyarrow.flight` round trips | `make test-pythonsdk`; opt-in `QUARREL_FLIGHT_URI=...` integration suite | Yes |
+| Allocation / leak | Payload-copy counters in matvec and Flight paths; 16-cycle server leak gate | `cargo test -p quarrel-gguf -p quarrel-flight -p quarrel-server` | Yes |
 | Security | Advisories, licenses, duplicate versions, shell scripts | `make security shellcheck` | Yes |
 | Deployment | Helm render/lint, compose config, image healthcheck | `make helm-lint helm-template`, `docker compose config` | Yes |
 | Performance | Criterion benches and benchtool baselines | `make bench`, `python3 scripts/bench.py --profile performance` | Yes before release |

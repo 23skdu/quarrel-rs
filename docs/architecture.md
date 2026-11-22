@@ -14,7 +14,7 @@ GGUF/SIMD/core, and `quarrel-core` depends on no transport, backend or async run
 
 ```mermaid
 flowchart TB
-    Agent["Agent / Python SDK"] -->|"Arrow Flight over gRPC"| Flight
+    Agent["Agent / Python SDK ✅"] -->|"Arrow Flight over gRPC"| Flight
     Browser["Browser UI"] -->|"HTTP + SSE"| Api
     Sdk["OpenAI-compatible SDK"] -->|"JSON / SSE"| Api
 
@@ -76,7 +76,8 @@ flowchart TB
 | `quarrel-simd` | Scalar reference math and runtime-dispatched SIMD; the only home for hot-path `unsafe` | ✅ |
 | `quarrel-gguf` | GGUF v1–v3 parser, `memmap2` ownership, typed tensor views, quant dequant/dot kernels | ✅ |
 | `quarrel-engine` | Scheduler, paged KV cache, radix prefix cache, sampler, health audit, backend trait, reference backend | ✅ |
-| `quarrel-flight` | Canonical Arrow schemas, zero-copy adapters, Flight service and IPC golden fixtures | ✅ |
+| `quarrel-flight` | Canonical Arrow schemas, zero-copy adapters, generate/embed Flight service and IPC golden fixtures | ✅ |
+| `pythonsdk` | `pyarrow.flight` client, pure-Python schema specs and notebook example | ✅ |
 | `quarrel-api` | OpenAI/Ollama DTOs, axum handlers, SSE/NDJSON streaming, generated OpenAPI document, embedded WebUI | ✅ |
 | `quarrel-server` | CLI/config parsing and process lifecycle; delegates to the libraries above | ✅ |
 | `quarrel-observability` | Metric constants, recorder, tracing layers and OTLP feature (currently living in `quarrel-server`) | ⏳ |

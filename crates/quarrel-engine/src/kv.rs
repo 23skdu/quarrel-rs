@@ -1,13 +1,21 @@
-//! Bounded paged KV cache and an LRU radix prefix cache.
+//! Bounded paged KV caches and an LRU radix prefix cache.
 //!
 //! [`PagedKvCache`] owns a fixed number of fixed-size blocks. A sequence is an
 //! opaque `u64` handle that owns zero or more blocks; blocks are returned to a
 //! free list by [`PagedKvCache::rollback`] and [`PagedKvCache::free`]. The
 //! caller keeps the association between a `RequestId` and a sequence id.
 //!
-//! [`RadixPrefixCache`] maps token sequences to `u64` payloads and answers
-//! longest-prefix queries. Both structures are synchronous and use only safe
-//! standard-library collections.
+//! [`BlockTableKvCache`] adds explicit per-sequence block tables, copy-on-write
+//! sharing of immutable prefix blocks and reference-counted block lifetime.
+//! [`RadixPrefixCache`] is a compressed radix tree over token sequences with
+//! LRU eviction and borrowed prefix handles. All of them are synchronous and
+//! use only safe standard-library collections.
+
+pub mod block_table;
+pub mod radix;
+
+pub use block_table::BlockTableKvCache;
+pub use radix::{PrefixRef, RadixPrefixCache};
 
 use crate::EngineError;
 use quarrel_core::RequestId;
@@ -290,148 +298,9 @@ impl PagedKvCache {
     }
 }
 
-#[derive(Debug)]
-struct PrefixEntry {
-    tokens: Vec<i32>,
-    value: u64,
-    last_used: u64,
-}
-
-/// An LRU cache mapping token sequences to `u64` payloads.
-///
-/// Inserting an identical sequence replaces its payload and refreshes its
-/// recency. When the cache is full, the least recently used entry is evicted;
-/// either way `insert` returns the displaced payload, if any. Prefix lookups
-/// also refresh recency, so a popular prefix is less likely to be evicted.
-#[derive(Debug)]
-pub struct RadixPrefixCache {
-    capacity: usize,
-    entries: Vec<PrefixEntry>,
-    clock: u64,
-}
-
-impl RadixPrefixCache {
-    /// Creates a cache that holds at most `capacity` sequences.
-    ///
-    /// A capacity of zero is allowed; such a cache simply never stores an
-    /// entry.
-    #[must_use]
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            entries: Vec::new(),
-            clock: 0,
-        }
-    }
-
-    /// Inserts `tokens` with `value`, returning any displaced payload.
-    ///
-    /// The returned value is the previous payload for an identical key, or the
-    /// evicted payload when a new key displaces the least recently used entry.
-    pub fn insert(&mut self, tokens: &[i32], value: u64) -> Option<u64> {
-        if self.capacity == 0 {
-            return None;
-        }
-
-        if let Some(position) = self
-            .entries
-            .iter()
-            .position(|entry| entry.tokens.as_slice() == tokens)
-        {
-            let displaced = self.entries[position].value;
-            self.entries[position].value = value;
-            self.touch(position);
-            return Some(displaced);
-        }
-
-        let mut displaced = None;
-        if self.entries.len() == self.capacity {
-            let victim = self
-                .entries
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, entry)| entry.last_used)
-                .map(|(position, _)| position);
-            if let Some(position) = victim {
-                displaced = Some(self.entries[position].value);
-                self.entries.remove(position);
-            }
-        }
-
-        self.clock = self.clock.wrapping_add(1);
-        self.entries.push(PrefixEntry {
-            tokens: tokens.to_vec(),
-            value,
-            last_used: self.clock,
-        });
-        displaced
-    }
-
-    /// Returns the longest stored prefix of `tokens` and its payload.
-    ///
-    /// A matching empty prefix counts when an empty key was inserted. Ties are
-    /// broken in favour of the most recently used entry, which is then touched.
-    pub fn longest_prefix(&mut self, tokens: &[i32]) -> Option<(usize, u64)> {
-        let mut best_position: Option<usize> = None;
-        let mut best_length = 0usize;
-        let mut best_recency = 0u64;
-        for (position, entry) in self.entries.iter().enumerate() {
-            if entry.tokens.is_empty() && !tokens.is_empty() {
-                continue;
-            }
-            let matched = entry
-                .tokens
-                .iter()
-                .zip(tokens)
-                .take_while(|(left, right)| left == right)
-                .count();
-            let eligible = matched > 0 || (entry.tokens.is_empty() && tokens.is_empty());
-            if !eligible {
-                continue;
-            }
-            let better = best_position.is_none()
-                || matched > best_length
-                || (matched == best_length && entry.last_used > best_recency);
-            if better {
-                best_position = Some(position);
-                best_length = matched;
-                best_recency = entry.last_used;
-            }
-        }
-
-        let position = best_position?;
-        self.touch(position);
-        Some((best_length, self.entries[position].value))
-    }
-
-    /// Returns the number of entries currently stored.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Returns `true` when no entries are stored.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Removes all entries without changing the capacity.
-    pub fn clear(&mut self) {
-        self.entries.clear();
-    }
-
-    fn touch(&mut self, position: usize) {
-        self.clock = self.clock.wrapping_add(1);
-        if let Some(entry) = self.entries.get_mut(position) {
-            entry.last_used = self.clock;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{PagedKvCache, RadixPrefixCache};
+    use super::PagedKvCache;
     use crate::EngineError;
     use proptest::prelude::*;
     use quarrel_core::RequestId;
@@ -563,47 +432,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn radix_prefix_basics() {
-        let mut cache = RadixPrefixCache::new(4);
-        assert!(cache.is_empty());
-        assert_eq!(cache.insert(&[1, 2, 3], 10), None);
-        assert_eq!(cache.insert(&[1, 2, 4], 11), None);
-        assert_eq!(cache.longest_prefix(&[1, 2, 3, 9]), Some((3, 10)));
-        // The previous lookup refreshed entry `[1, 2, 3]`, so it wins the tie.
-        assert_eq!(cache.longest_prefix(&[1, 2]), Some((2, 10)));
-        assert_eq!(cache.longest_prefix(&[9]), None);
-        assert_eq!(cache.len(), 2);
-    }
-
-    #[test]
-    fn radix_prefix_replacement_and_lru_eviction() {
-        let mut cache = RadixPrefixCache::new(2);
-        assert_eq!(cache.insert(&[1], 1), None);
-        assert_eq!(cache.insert(&[2], 2), None);
-        assert_eq!(cache.longest_prefix(&[1]), Some((1, 1)));
-        assert_eq!(cache.insert(&[1], 3), Some(1));
-        assert_eq!(cache.insert(&[3], 4), Some(2));
-        assert_eq!(cache.len(), 2);
-        assert_eq!(cache.longest_prefix(&[1]), Some((1, 3)));
-        assert_eq!(cache.longest_prefix(&[2]), None);
-    }
-
-    #[test]
-    fn radix_prefix_zero_capacity_and_clear() {
-        let mut cache = RadixPrefixCache::new(0);
-        assert_eq!(cache.insert(&[1], 1), None);
-        assert_eq!(cache.len(), 0);
-        assert_eq!(cache.longest_prefix(&[1]), None);
-
-        let mut cache = RadixPrefixCache::new(2);
-        assert_eq!(cache.insert(&[], 7), None);
-        assert_eq!(cache.longest_prefix(&[]), Some((0, 7)));
-        cache.clear();
-        assert!(cache.is_empty());
-        assert_eq!(cache.longest_prefix(&[]), None);
-    }
-
     proptest! {
         #[test]
         fn kv_append_rollback_free_invariants(
@@ -627,43 +455,6 @@ mod tests {
 
             cache.free(seq).expect("free");
             prop_assert_eq!(cache.blocks_used(), 0);
-        }
-
-        #[test]
-        fn radix_prefix_returns_observed_values(
-            first in proptest::collection::vec(0i32..8, 1..8),
-            second in proptest::collection::vec(0i32..8, 1..8),
-            first_value in any::<u64>(),
-            second_value in any::<u64>(),
-        ) {
-            let same_key = first == second;
-            let mut cache = RadixPrefixCache::new(2);
-            prop_assert_eq!(cache.insert(&first, first_value), None);
-            let displaced = if same_key { Some(first_value) } else { None };
-            prop_assert_eq!(cache.insert(&second, second_value), displaced);
-            prop_assert!(cache.len() <= 2);
-
-            let first_match = first.len();
-            let second_match = second
-                .iter()
-                .zip(first.iter())
-                .take_while(|(left, right)| left == right)
-                .count();
-            let expected_length = first_match.max(second_match);
-            let mut allowed_values = Vec::new();
-            if first_match == expected_length {
-                let value = if same_key { second_value } else { first_value };
-                allowed_values.push(value);
-            }
-            if !same_key && second_match == expected_length {
-                allowed_values.push(second_value);
-            }
-
-            let (matched, value) = cache
-                .longest_prefix(&first)
-                .expect("inserted prefix is present");
-            prop_assert_eq!(matched, expected_length);
-            prop_assert!(allowed_values.contains(&value));
         }
     }
 }

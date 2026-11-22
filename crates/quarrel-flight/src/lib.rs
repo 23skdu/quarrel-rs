@@ -16,9 +16,10 @@ mod stream;
 
 pub use adapters::{
     DEFAULT_MODEL_ID, FINISH_REASON_LENGTH, GenerateRequestView, GenerateResponseBuilder,
-    assert_kv_dtype_endianness, decode_embedding, decode_finished, decode_generate_request,
-    decode_generate_request_view, decode_generate_response, decode_kv_block, decode_top_logprobs,
-    embedding_matrix_values, embedding_response_schema_for, embedding_values, encode_embedding,
+    assert_kv_dtype_endianness, decode_embed_request, decode_embed_request_rows, decode_embedding,
+    decode_finished, decode_generate_request, decode_generate_request_view,
+    decode_generate_response, decode_kv_block, decode_top_logprobs, embedding_matrix_values,
+    embedding_response_schema_for, embedding_values, encode_embed_request, encode_embedding,
     encode_generate_request, encode_generate_response, encode_generate_response_from_arrays,
     encode_generate_response_with_logprobs, encode_kv_block, generate_response_token_schema,
     kv_block_payload, kv_blocks_schema_for, parse_kv_dtype, request_stop_token_ids,
@@ -33,7 +34,8 @@ pub use schema::{
     schema_hash,
 };
 pub use service::{
-    DEFAULT_QUEUE_DEPTH, GENERATE_PATH, HEALTH_ACTION, QuarrelFlightService, flight_server,
+    DEFAULT_QUEUE_DEPTH, EMBED_PATH, GENERATE_PATH, HEALTH_ACTION, QuarrelFlightService,
+    flight_server,
 };
 pub use stream::{RecordBatchStream, record_batch_stream, record_batch_stream_from_iter};
 

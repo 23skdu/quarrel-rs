@@ -13,15 +13,15 @@ use quarrel_core::{
     BlockId, GenerateRequest, KvBlock, KvDtype, ModelId, RequestId, SamplingParams, Token,
 };
 use quarrel_flight::{
-    FlightError, GenerateResponseBuilder, assert_kv_dtype_endianness, decode_embedding,
-    decode_finished, decode_generate_request, decode_generate_request_view,
-    decode_generate_response, decode_kv_block, decode_top_logprobs, embed_response_schema,
-    embedding_matrix_values, embedding_values, encode_embedding, encode_generate_request,
-    encode_generate_response, encode_generate_response_from_arrays,
-    encode_generate_response_with_logprobs, encode_kv_block, generate_request_schema,
-    generate_response_schema, kv_block_payload, kv_blocks_schema, kv_blocks_schema_for,
-    parse_kv_dtype, request_stop_token_ids, request_token_ids, response_logprobs,
-    response_token_ids,
+    FlightError, GenerateResponseBuilder, assert_kv_dtype_endianness, decode_embed_request,
+    decode_embed_request_rows, decode_embedding, decode_finished, decode_generate_request,
+    decode_generate_request_view, decode_generate_response, decode_kv_block, decode_top_logprobs,
+    embed_request_schema, embed_response_schema, embedding_matrix_values, embedding_values,
+    encode_embed_request, encode_embedding, encode_generate_request, encode_generate_response,
+    encode_generate_response_from_arrays, encode_generate_response_with_logprobs, encode_kv_block,
+    generate_request_schema, generate_response_schema, kv_block_payload, kv_blocks_schema,
+    kv_blocks_schema_for, parse_kv_dtype, request_stop_token_ids, request_token_ids,
+    response_logprobs, response_token_ids,
 };
 
 fn request_id() -> RequestId {
@@ -182,6 +182,101 @@ fn embedding_round_trip_including_empty_vector() {
 
     let canonical = encode_embedding(&request_id(), 1, &[1.0, 2.0, 3.0, 4.0]).unwrap();
     assert_eq!(canonical.schema(), embed_response_schema());
+}
+
+#[test]
+fn embed_request_round_trip_and_multi_row_decode() {
+    let batch = encode_embed_request(&request_id(), i32::MIN).unwrap();
+    assert_eq!(batch.schema(), embed_request_schema());
+    assert_eq!(
+        decode_embed_request(&batch).unwrap(),
+        (request_id(), i32::MIN)
+    );
+
+    let rows = vec![(request_id(), 11), (request_id(), -7)];
+    let multi = RecordBatch::try_new(
+        embed_request_schema(),
+        vec![
+            Arc::new(StringArray::from(vec![
+                request_id().as_str(),
+                request_id().as_str(),
+            ])),
+            Arc::new(Int32Array::from(vec![11, -7])),
+        ],
+    )
+    .unwrap();
+    assert_eq!(decode_embed_request_rows(&multi).unwrap(), rows);
+    assert!(matches!(
+        decode_embed_request(&multi),
+        Err(FlightError::ExpectedSingleRow(2))
+    ));
+}
+
+#[test]
+fn embed_request_decoder_rejects_wrong_schema_and_nulls() {
+    let wrong_schema = one_column_batch(
+        Field::new("token_id", DataType::Utf8, false),
+        Arc::new(StringArray::from(vec!["not an int"])),
+    );
+    assert!(matches!(
+        decode_embed_request(&wrong_schema),
+        Err(FlightError::MissingField(_) | FlightError::SchemaMismatch { .. })
+    ));
+
+    let swapped = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("token_id", DataType::Int32, false),
+            Field::new("request_id", DataType::Utf8, false),
+        ])),
+        vec![
+            Arc::new(Int32Array::from(vec![1])),
+            Arc::new(StringArray::from(vec!["agent-0001"])),
+        ],
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_embed_request(&swapped),
+        Err(FlightError::SchemaMismatch { .. })
+    ));
+
+    let empty_id = RecordBatch::try_new(
+        embed_request_schema(),
+        vec![
+            Arc::new(StringArray::from(vec![""])),
+            Arc::new(Int32Array::from(vec![1])),
+        ],
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_embed_request(&empty_id),
+        Err(FlightError::InvalidArgument(_))
+    ));
+
+    let nullable_id = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("request_id", DataType::Utf8, true),
+            Field::new("token_id", DataType::Int32, false),
+        ])),
+        vec![
+            Arc::new(StringArray::from(vec![None::<&str>])),
+            Arc::new(Int32Array::from(vec![1])),
+        ],
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_embed_request(&nullable_id),
+        Err(FlightError::SchemaMismatch { .. })
+    ));
+
+    let empty = RecordBatch::try_new(
+        embed_request_schema(),
+        vec![
+            Arc::new(StringArray::from(Vec::<&str>::new())),
+            Arc::new(Int32Array::from(Vec::<i32>::new())),
+        ],
+    )
+    .unwrap();
+    assert!(decode_embed_request_rows(&empty).unwrap().is_empty());
 }
 
 #[test]
