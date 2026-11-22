@@ -1,0 +1,20 @@
+# Standalone harness crate for the environment-sensitive iai-callgrind benchmarks.
+# It is intentionally outside the main workspace so `make ci`, `make test` and
+# `cargo bench --workspace` never require valgrind or iai-callgrind-runner.
+[package]
+name = "quarrel-bench-iai"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100.0"
+license = "Unlicense"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+iai-callgrind = "=0.16.1"
+quarrel-simd = { path = "../../crates/quarrel-simd" }
+
+[[bench]]
+name = "hot_kernels"
+harness = false

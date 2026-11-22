@@ -15,6 +15,13 @@ DOCKER ?= docker
 COMPOSE ?= $(DOCKER) compose
 JQ ?= jq
 YQ ?= yq
+VALGRIND ?= valgrind
+IAI_RUNNER ?= iai-callgrind-runner
+IAI_VERSION ?= 0.16.1
+IAI_MANIFEST := benches/iai/Cargo.toml
+BASELINE_DIR := benches/baselines
+CRITERION_BENCHES := quarrel-gguf:matvec quarrel-gguf:quant quarrel-simd:kernels \
+	quarrel-engine:sampler quarrel-flight:arrow_roundtrip
 IMAGE ?= quarrel-rs:local
 CUDA_VERSION ?= 12.8.1
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf dev)
@@ -33,10 +40,19 @@ REQUIRED_TOOLS := cargo rustfmt helm docker shellcheck
 OPENAPI_FILE := api/openapi.json
 HOOKS_DIR := $(shell git rev-parse --git-path hooks 2>/dev/null || printf '.git/hooks')
 
+# iai-callgrind is deliberately opt-in: it needs valgrind and a runner binary
+# whose version matches the pinned iai-callgrind crate in benches/iai/Cargo.toml.
+define require_iai_tools
+	@command -v $(VALGRIND) >/dev/null 2>&1 || { echo "$(VALGRIND) is required for iai benchmarks"; exit 1; }
+	@command -v $(IAI_RUNNER) >/dev/null 2>&1 || { echo "$(IAI_RUNNER) $(IAI_VERSION) is required: cargo install iai-callgrind-runner --version $(IAI_VERSION) --locked"; exit 1; }
+endef
+
 .PHONY: help tools tools-brew tools-cargo tools-miri check-tools makehooks unmakehooks precommit \
 	build build-release run test test-unit test-benchtool nextest fmt fmt-check lint audit deny \
-	security shellcheck \
-	coverage coverage-floors bench bench-quality bench-performance bench-regression \
+	security shellcheck test-pythonsdk \
+	coverage coverage-floors bench bench-iai bench-iai-baseline bench-iai-compare \
+	bench-criterion-baseline bench-criterion-compare bench-baselines \
+	bench-quality bench-performance bench-regression \
 	fuzz fuzz-fmt fuzz-fmt-check fuzz-smoke fuzz-coverage miri mutants outdated doc bloat openapi \
 	openapi-check metrics-check \
 	docker-build docker-build-cpu docker-build-cuda docker-build-distroless docker-build-all \
@@ -116,6 +132,10 @@ test:
 test-unit:
 	$(CARGO) test --workspace --locked --lib --bins
 
+## Test the pyarrow Flight SDK (skips pyarrow-dependent cases when unavailable)
+test-pythonsdk:
+	python3 -m unittest discover -s pythonsdk/tests -v
+
 ## Test the Go benchtool and its Python driver (no Rust build required)
 test-benchtool:
 	@test -z "$$(gofmt -l cmd/benchtool)" || { echo "gofmt required for cmd/benchtool"; exit 1; }
@@ -165,9 +185,72 @@ coverage-floors:
 	$(CARGO) llvm-cov -p quarrel-core -p quarrel-gguf -p quarrel-simd --fail-under-lines 85
 	$(CARGO) llvm-cov -p quarrel-engine -p quarrel-api -p quarrel-server --fail-under-lines 80
 
-## Criterion/iai benchmarks (workloads land in Phase 1)
+## Criterion benchmarks only; iai is opt-in via bench-iai
 bench:
 	$(CARGO) bench --workspace --locked
+
+## Run pinned iai-callgrind SIMD benchmarks (needs valgrind + runner)
+bench-iai:
+	$(call require_iai_tools)
+	$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels
+
+## Refresh the local iai-callgrind reference baseline artifact
+bench-iai-baseline:
+	$(call require_iai_tools)
+	@mkdir -p $(BASELINE_DIR)
+	@{ \
+		printf '%s\n' '# Local reference baseline — NOT a cross-machine gate.'; \
+		printf '%s\n' '# Refresh only on an idle, documented machine: make bench-iai-baseline'; \
+		printf 'recorded_utc: %s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+		printf 'counts_command: %s\n' '$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels'; \
+		printf 'baseline_command: %s\n' '$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels -- --save-baseline=committed'; \
+		printf 'rustc: %s\n' "$$(rustc -V 2>/dev/null || printf unavailable)"; \
+		printf 'valgrind: %s\n' "$$($(VALGRIND) --version 2>/dev/null || printf unavailable)"; \
+		printf 'iai-callgrind: %s\n' '$(IAI_VERSION) (crate and runner)'; \
+		printf 'cpu: %s\n' "$$(sed -n 's/^model name[^:]*: *//p' /proc/cpuinfo | head -1)"; \
+		printf 'mem_total: %s\n' "$$(awk '/MemTotal/ {printf "%.1f GiB", $$2 / 1048576}' /proc/meminfo)"; \
+		printf '\n'; \
+	} > $(BASELINE_DIR)/iai-callgrind-local.txt
+	$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels 2>&1 | tee -a $(BASELINE_DIR)/iai-callgrind-local.txt
+	$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels -- --save-baseline=committed >/dev/null 2>&1
+	@printf '\nbaseline: committed (saved under benches/iai/target/iai, not committed)\n' >> $(BASELINE_DIR)/iai-callgrind-local.txt
+
+## Compare current iai-callgrind counts with the last local baseline
+bench-iai-compare:
+	$(call require_iai_tools)
+	$(CARGO) bench --locked --manifest-path $(IAI_MANIFEST) --bench hot_kernels -- --baseline=committed
+
+## Refresh the local Criterion reference baseline artifact
+bench-criterion-baseline:
+	@mkdir -p $(BASELINE_DIR)
+	@{ \
+		printf '%s\n' '# Local reference baseline — NOT a cross-machine gate.'; \
+		printf '%s\n' '# Refresh only on an idle, documented machine: make bench-criterion-baseline'; \
+		printf 'recorded_utc: %s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+		printf 'command: %s\n' 'for each CRITERION_BENCH: $(CARGO) bench --locked -p <crate> --bench <name> -- --save-baseline committed'; \
+		printf 'rustc: %s\n' "$$(rustc -V 2>/dev/null || printf unavailable)"; \
+		printf 'python3: %s\n' "$$(python3 --version 2>/dev/null || printf unavailable)"; \
+		printf 'go: %s\n' "$$(go version 2>/dev/null || printf unavailable)"; \
+		printf 'cpu: %s\n' "$$(sed -n 's/^model name[^:]*: *//p' /proc/cpuinfo | head -1)"; \
+		printf 'mem_total: %s\n' "$$(awk '/MemTotal/ {printf "%.1f GiB", $$2 / 1048576}' /proc/meminfo)"; \
+		printf '\n'; \
+	} > $(BASELINE_DIR)/criterion-local.txt
+	{ for spec in $(CRITERION_BENCHES); do \
+		pkg=$${spec%%:*}; bench=$${spec##*:}; \
+		echo "==> $$pkg/$$bench"; \
+		$(CARGO) bench --locked -p $$pkg --bench $$bench -- --save-baseline committed; \
+	done; } 2>&1 | tee -a $(BASELINE_DIR)/criterion-local.txt
+
+## Compare current Criterion timings with the last local baseline
+bench-criterion-compare:
+	@for spec in $(CRITERION_BENCHES); do \
+		pkg=$${spec%%:*}; bench=$${spec##*:}; \
+		echo "==> $$pkg/$$bench"; \
+		$(CARGO) bench --locked -p $$pkg --bench $$bench -- --baseline committed; \
+	done
+
+## Refresh both committed local baseline artifacts (slow)
+bench-baselines: bench-criterion-baseline bench-iai-baseline
 
 ## Replay all quality gates through the Go benchtool
 bench-quality:
@@ -314,14 +397,15 @@ links:
 	@echo "grafana:    http://localhost:3000"
 
 ## Full local gate sequence used by CI
-ci: fmt-check fuzz-fmt-check lint test security openapi-check metrics-check helm-lint container-check
+ci: fmt-check fuzz-fmt-check lint test test-pythonsdk security openapi-check metrics-check helm-lint container-check
 	$(COMPOSE) config --quiet
 
-## Remove build artefacts and generated caches
+## Remove build artefacts, generated caches and unused Docker objects (named volumes kept)
 clean:
 	$(CARGO) clean
 	rm -rf target/llvm-cov target/criterion .coverage coverage .pytest_cache
 	find . -name '*.profraw' -delete
+	-$(DOCKER) system prune -af
 
 ## clean plus local runtime state (never touches tracked source files)
 distclean: clean docker-down

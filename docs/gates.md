@@ -6,13 +6,17 @@ methodology is in [performance](performance.md); the full strategy is in [the te
 
 > **Rule:** a gate is either automated and blocking, or it is not a gate. Manual "we checked it"
 > steps belong in review checklists, not in this document.
+>
+> **Validation model:** local commands in this document are authoritative here. The committed
+> GitHub Actions workflow is not currently executed on the remote, so a green local `make ci` is
+> the evidence required before ticking a roadmap row.
 
 ## 1. Gate layers
 
 | Layer | When | Commands | Blocking? |
 |-------|------|----------|-----------|
 | Commit | every `git commit` | `scripts/pre-commit` via `make makehooks` | Yes, locally |
-| Pull request | every push/PR to `main` | `.github/workflows/ci.yml` (including `make precommit` and fuzz smoke) | Yes, on GitHub |
+| Pull request | every push/PR when remote CI is enabled | `.github/workflows/ci.yml` (including `make precommit` and fuzz smoke) | Local `make ci` is authoritative here |
 | Security | every PR | `make security` (`cargo audit` + `cargo deny`) | Yes |
 | Coverage | every PR once floors are enabled | `make coverage-floors`, `make coverage` | Yes |
 | Contract | every PR | `make openapi-check`, `make metrics-check`, `make helm-lint`, `make container-check` | Yes |
@@ -38,7 +42,7 @@ wrong, fix the hook.
 
 ## 3. Pull-request gates
 
-`.github/workflows/ci.yml` currently has five jobs:
+The committed convenience workflow `.github/workflows/ci.yml` has five jobs:
 
 | Job | Steps | Rationale |
 |-----|-------|-----------|
@@ -48,8 +52,10 @@ wrong, fix the hook.
 | `tooling` | `make test-benchtool`, benchtool dry-run | The Go/Python test tooling itself is tested like any other code |
 | `fuzz` | `make fuzz-smoke` on nightly with `cargo-fuzz` | Parser/sampler/Arrow decoders survive malformed input |
 
-Dependabot PRs use exactly the same workflow. Major Cargo upgrades are deliberately excluded from
-bot automation because the MSRV is pinned in `rust-toolchain.toml`.
+The table describes the committed workflow, which is a convenience when remote CI is enabled; the
+local `make ci` sequence below is authoritative here and now also includes `make test-pythonsdk`.
+Dependabot PRs use the same workflow when remote CI is enabled. Major Cargo upgrades are
+deliberately excluded from bot automation because the MSRV is pinned in `rust-toolchain.toml`.
 
 ### 3.1 Source and style
 
@@ -58,6 +64,8 @@ bot automation because the MSRV is pinned in `rust-toolchain.toml`.
   Any warning is an error, including redundant documentation attributes and needless returns.
 - `make test` — `cargo nextest run --workspace --locked` when `cargo-nextest` is installed, with a
   `cargo test --workspace --locked` fallback for minimal environments.
+- `make test-pythonsdk` — `python3 -m unittest discover -s pythonsdk/tests -v`; pyarrow-dependent
+  cases skip cleanly when pyarrow is unavailable. This is now a prerequisite of `make ci`.
 
 ### 3.2 Supply chain
 
@@ -119,7 +127,8 @@ These are not required for every commit, but are required before a release tag.
 | Fuzz coverage | `make fuzz-coverage` | Corpus coverage for fuzz targets, reported with `cargo fuzz coverage` |
 | Mutation | `make mutants` | `cargo mutants` on core, SIMD and sampler; no surviving mutants |
 | Miri | `make miri` | `cargo +nightly miri test` for unsafe/FFI-adjacent crates |
-| Benchmarks | `make bench` | Criterion baselines under `benches/baselines/` |
+| Benchmarks | `make bench` | Criterion timings for all five bench binaries; `make bench-criterion-baseline` refreshes the local artifact |
+| iai hot kernels | `make bench-iai` | Deterministic SIMD dot/softmax instruction and cycle counts via pinned iai-callgrind 0.16.1; explicitly opt-in |
 | Bench replay | `make bench-regression` | Go benchtool replays quality + performance profiles with baseline comparison |
 | Allocation | `make allocation-gate` | Zero payload-copy allocations in decode/Flight paths after warm-up |
 | Leak | `make leak-gate` | 16 load/search/close cycles with < 5 MB heap growth |
@@ -130,12 +139,18 @@ The fuzz targets live in the root `fuzz/` crate and are excluded from the main w
 target exposes a small safe parsing/decoding entry point from its library crate, so fuzzing exercises
 production code rather than a copy of it.
 
+`make bench-iai`, `make bench-iai-baseline` and `make bench-iai-compare` are deliberately absent
+from `make ci` and all test targets: they need valgrind plus `iai-callgrind-runner 0.16.1`, and
+Callgrind counts are machine-specific. The committed files in `benches/baselines/` are local
+reference artifacts, not blocking cross-machine gates; see `benches/baselines/README.md` for the
+install and refresh procedure.
+
 ## 5. Release gates
 
 A `v*` tag is eligible for release only when:
 
 1. every PR gate above is green on that commit;
-2. all deep quality gates have run against the release candidate and been archived as CI artifacts;
+2. all deep quality gates have run against the release candidate and been archived locally;
 3. `docs/performance.md` numbers are reproducible with the committed make commands;
 4. the parity report in `docs/parity.md` is current;
 5. the container image has an SBOM and is signed (cosign), with `SOURCE_DATE_EPOCH` set for
@@ -146,11 +161,15 @@ A `v*` tag is eligible for release only when:
 
 ```bash
 make precommit          # same checks as the git hook
-make ci                 # full PR gate set, including charts and compose
+make ci                 # full local PR gate set, including Python SDK and compose
+make test-pythonsdk     # Python Flight SDK suite (pyarrow cases skip when unavailable)
 make test-benchtool     # Go + Python tooling tests
 make bench-quality      # replay quality gates through benchtool
 make bench-performance  # timed checks with baseline comparison
 make bench-regression   # quality + performance replay for a release candidate
+make bench-iai          # deterministic iai-callgrind hot kernels (not in ci)
+make bench-iai-baseline # refresh benches/baselines/iai-callgrind-local.txt
+make bench-criterion-baseline # refresh benches/baselines/criterion-local.txt
 make coverage-floors    # enforce roadmap coverage floors
 make coverage           # HTML coverage report
 make fuzz               # 60 s per fuzz target
@@ -165,7 +184,7 @@ docker compose config --quiet
 ## 7. Adding a new gate
 
 1. Add a self-documenting target to the root `Makefile` with a `##` comment so `make help` lists it.
-2. Add the command to `.github/workflows/ci.yml` (PR gate) or the nightly/release workflow.
+2. When remote CI is enabled, add the command to `.github/workflows/ci.yml` (PR gate) or the nightly/release workflow.
 3. Document the gate in the tables above, including what it catches and how to reproduce failures.
 4. If it is a contract gate, add a drift test so CI fails on mismatch rather than on silence.
 5. Update the relevant roadmap checkbox only after the gate passes on a clean checkout.

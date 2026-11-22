@@ -1,0 +1,225 @@
+# Local reference baseline — NOT a cross-machine gate.
+# Refresh only on an idle, documented machine: make bench-criterion-baseline
+recorded_utc: 2026-11-22T22:42:56Z
+command: for each CRITERION_BENCH: cargo bench --locked -p <crate> --bench <name> -- --save-baseline committed
+rustc: rustc 1.100.0 (0ef1bc386 2026-11-09)
+python3: Python 3.15.2
+go: go version go1.27.4 linux/amd64
+cpu: 12th Gen Intel(R) Core(TM) i7-12650H
+mem_total: 22.4 GiB
+
+==> quarrel-gguf/matvec
+   Compiling quarrel-gguf v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-gguf)
+    Finished `bench` profile [optimized] target(s) in 6.68s
+     Running benches/matvec.rs (target/release/build/quarrel-gguf/da3795d65f4fc833/out/matvec-da3795d65f4fc833)
+Gnuplot not found, using plotters backend
+Benchmarking gguf_matvec/f32
+Benchmarking gguf_matvec/f32: Warming up for 3.0000 s
+Benchmarking gguf_matvec/f32: Collecting 100 samples in estimated 5.1784 s (91k iterations)
+Benchmarking gguf_matvec/f32: Analyzing
+gguf_matvec/f32         time:   [50.659 µs 51.428 µs 52.313 µs]
+Benchmarking gguf_matvec/f16
+Benchmarking gguf_matvec/f16: Warming up for 3.0000 s
+Benchmarking gguf_matvec/f16: Collecting 100 samples in estimated 5.1329 s (45k iterations)
+Benchmarking gguf_matvec/f16: Analyzing
+gguf_matvec/f16         time:   [111.74 µs 112.25 µs 112.79 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking gguf_matvec/bf16
+Benchmarking gguf_matvec/bf16: Warming up for 3.0000 s
+Benchmarking gguf_matvec/bf16: Collecting 100 samples in estimated 5.2600 s (86k iterations)
+Benchmarking gguf_matvec/bf16: Analyzing
+gguf_matvec/bf16        time:   [57.672 µs 58.214 µs 58.814 µs]
+Benchmarking gguf_matvec/q8_0
+Benchmarking gguf_matvec/q8_0: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q8_0: Collecting 100 samples in estimated 5.1274 s (131k iterations)
+Benchmarking gguf_matvec/q8_0: Analyzing
+gguf_matvec/q8_0        time:   [38.351 µs 38.560 µs 38.741 µs]
+Found 11 outliers among 100 measurements (11.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  5 (5.00%) high mild
+  3 (3.00%) high severe
+Benchmarking gguf_matvec/q4_0
+Benchmarking gguf_matvec/q4_0: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q4_0: Collecting 100 samples in estimated 5.1802 s (91k iterations)
+Benchmarking gguf_matvec/q4_0: Analyzing
+gguf_matvec/q4_0        time:   [50.104 µs 50.284 µs 50.488 µs]
+Found 17 outliers among 100 measurements (17.00%)
+  1 (1.00%) low severe
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  12 (12.00%) high severe
+Benchmarking gguf_matvec/q2_k
+Benchmarking gguf_matvec/q2_k: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q2_k: Collecting 100 samples in estimated 5.1960 s (71k iterations)
+Benchmarking gguf_matvec/q2_k: Analyzing
+gguf_matvec/q2_k        time:   [73.260 µs 73.368 µs 73.510 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking gguf_matvec/q3_k
+Benchmarking gguf_matvec/q3_k: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q3_k: Collecting 100 samples in estimated 5.2187 s (40k iterations)
+Benchmarking gguf_matvec/q3_k: Analyzing
+gguf_matvec/q3_k        time:   [128.10 µs 129.63 µs 131.61 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) low severe
+  1 (1.00%) high mild
+  4 (4.00%) high severe
+Benchmarking gguf_matvec/q4_k
+Benchmarking gguf_matvec/q4_k: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q4_k: Collecting 100 samples in estimated 5.2653 s (50k iterations)
+Benchmarking gguf_matvec/q4_k: Analyzing
+gguf_matvec/q4_k        time:   [103.61 µs 104.88 µs 106.52 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) high mild
+  6 (6.00%) high severe
+Benchmarking gguf_matvec/q5_k
+Benchmarking gguf_matvec/q5_k: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q5_k: Collecting 100 samples in estimated 5.1450 s (40k iterations)
+Benchmarking gguf_matvec/q5_k: Analyzing
+gguf_matvec/q5_k        time:   [345.98 µs 403.88 µs 466.26 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+Benchmarking gguf_matvec/q6_k
+Benchmarking gguf_matvec/q6_k: Warming up for 3.0000 s
+Benchmarking gguf_matvec/q6_k: Collecting 100 samples in estimated 6.6419 s (15k iterations)
+Benchmarking gguf_matvec/q6_k: Analyzing
+gguf_matvec/q6_k        time:   [204.08 µs 211.87 µs 222.16 µs]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+
+==> quarrel-gguf/quant
+   Compiling quarrel-gguf v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-gguf)
+    Finished `bench` profile [optimized] target(s) in 12.57s
+     Running benches/quant.rs (target/release/build/quarrel-gguf/9bcecab753862f76/out/quant-9bcecab753862f76)
+Gnuplot not found, using plotters backend
+Benchmarking quant_dot/dot_q8_0
+Benchmarking quant_dot/dot_q8_0: Warming up for 3.0000 s
+Benchmarking quant_dot/dot_q8_0: Collecting 100 samples in estimated 5.0439 s (424k iterations)
+Benchmarking quant_dot/dot_q8_0: Analyzing
+quant_dot/dot_q8_0      time:   [12.591 µs 14.225 µs 16.089 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high severe
+Benchmarking quant_dot/dot_q4_0
+Benchmarking quant_dot/dot_q4_0: Warming up for 3.0000 s
+Benchmarking quant_dot/dot_q4_0: Collecting 100 samples in estimated 5.0114 s (404k iterations)
+Benchmarking quant_dot/dot_q4_0: Analyzing
+quant_dot/dot_q4_0      time:   [10.988 µs 11.055 µs 11.136 µs]
+
+==> quarrel-simd/kernels
+   Compiling quarrel-simd v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-simd)
+    Finished `bench` profile [optimized] target(s) in 7.90s
+     Running benches/kernels.rs (target/release/build/quarrel-simd/d9d64b5f644d699b/out/kernels-d9d64b5f644d699b)
+Gnuplot not found, using plotters backend
+Benchmarking dot_f32/16
+Benchmarking dot_f32/16: Warming up for 3.0000 s
+Benchmarking dot_f32/16: Collecting 100 samples in estimated 5.0000 s (967M iterations)
+Benchmarking dot_f32/16: Analyzing
+dot_f32/16              time:   [5.7484 ns 6.3736 ns 7.0447 ns]
+Found 12 outliers among 100 measurements (12.00%)
+  1 (1.00%) high mild
+  11 (11.00%) high severe
+Benchmarking dot_f32/256
+Benchmarking dot_f32/256: Warming up for 3.0000 s
+Benchmarking dot_f32/256: Collecting 100 samples in estimated 5.0001 s (226M iterations)
+Benchmarking dot_f32/256: Analyzing
+dot_f32/256             time:   [17.202 ns 18.578 ns 20.394 ns]
+Found 18 outliers among 100 measurements (18.00%)
+  1 (1.00%) high mild
+  17 (17.00%) high severe
+Benchmarking dot_f32/4096
+Benchmarking dot_f32/4096: Warming up for 3.0000 s
+Benchmarking dot_f32/4096: Collecting 100 samples in estimated 5.0006 s (10M iterations)
+Benchmarking dot_f32/4096: Analyzing
+dot_f32/4096            time:   [415.87 ns 418.51 ns 421.72 ns]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high severe
+
+Benchmarking softmax_into/16
+Benchmarking softmax_into/16: Warming up for 3.0000 s
+Benchmarking softmax_into/16: Collecting 100 samples in estimated 5.0003 s (81M iterations)
+Benchmarking softmax_into/16: Analyzing
+softmax_into/16         time:   [57.584 ns 57.745 ns 57.883 ns]
+Found 11 outliers among 100 measurements (11.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  4 (4.00%) high severe
+Benchmarking softmax_into/256
+Benchmarking softmax_into/256: Warming up for 3.0000 s
+Benchmarking softmax_into/256: Collecting 100 samples in estimated 5.0042 s (5.8M iterations)
+Benchmarking softmax_into/256: Analyzing
+softmax_into/256        time:   [814.42 ns 816.41 ns 818.94 ns]
+Found 19 outliers among 100 measurements (19.00%)
+  1 (1.00%) low severe
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  15 (15.00%) high severe
+Benchmarking softmax_into/4096
+Benchmarking softmax_into/4096: Warming up for 3.0000 s
+Benchmarking softmax_into/4096: Collecting 100 samples in estimated 5.0173 s (384k iterations)
+Benchmarking softmax_into/4096: Analyzing
+softmax_into/4096       time:   [12.819 µs 12.875 µs 12.935 µs]
+
+==> quarrel-engine/sampler
+   Compiling quarrel-engine v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-engine)
+    Finished `bench` profile [optimized] target(s) in 7.60s
+     Running benches/sampler.rs (target/release/build/quarrel-engine/28101347ede82dab/out/sampler-28101347ede82dab)
+Gnuplot not found, using plotters backend
+Benchmarking sampler/argmax
+Benchmarking sampler/argmax: Warming up for 3.0000 s
+Benchmarking sampler/argmax: Collecting 100 samples in estimated 5.0002 s (42M iterations)
+Benchmarking sampler/argmax: Analyzing
+sampler/argmax          time:   [115.93 ns 116.41 ns 116.80 ns]
+Found 10 outliers among 100 measurements (10.00%)
+  4 (4.00%) low severe
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+Benchmarking sampler/softmax
+Benchmarking sampler/softmax: Warming up for 3.0000 s
+Benchmarking sampler/softmax: Collecting 100 samples in estimated 5.0018 s (7.2M iterations)
+Benchmarking sampler/softmax: Analyzing
+sampler/softmax         time:   [667.16 ns 668.08 ns 669.09 ns]
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) low mild
+  4 (4.00%) high mild
+Benchmarking sampler/sample
+Benchmarking sampler/sample: Warming up for 3.0000 s
+Benchmarking sampler/sample: Collecting 100 samples in estimated 5.0038 s (1.5M iterations)
+Benchmarking sampler/sample: Analyzing
+sampler/sample          time:   [3.1547 µs 3.1663 µs 3.1767 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) low severe
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+
+==> quarrel-flight/arrow_roundtrip
+   Compiling quarrel-core v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-core)
+   Compiling quarrel-gguf v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-gguf)
+   Compiling quarrel-engine v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-engine)
+   Compiling quarrel-flight v0.1.0 (/home/rsd/REPOS/quarrel-rs/crates/quarrel-flight)
+    Finished `bench` profile [optimized] target(s) in 15.80s
+     Running benches/arrow_roundtrip.rs (target/release/build/quarrel-flight/84e00df0e91131b1/out/arrow_roundtrip-84e00df0e91131b1)
+Gnuplot not found, using plotters backend
+Benchmarking arrow_f32_matrix/encode_ipc_250k_x_384
+Benchmarking arrow_f32_matrix/encode_ipc_250k_x_384: Warming up for 500.00 ms
+Benchmarking arrow_f32_matrix/encode_ipc_250k_x_384: Collecting 10 samples in estimated 4.1322 s (30 iterations)
+Benchmarking arrow_f32_matrix/encode_ipc_250k_x_384: Analyzing
+arrow_f32_matrix/encode_ipc_250k_x_384
+                        time:   [135.70 ms 136.47 ms 137.32 ms]
+Benchmarking arrow_f32_matrix/decode_ipc_and_borrow_slices_250k_x_384
+Benchmarking arrow_f32_matrix/decode_ipc_and_borrow_slices_250k_x_384: Warming up for 500.00 ms
+
+Warning: Unable to complete 10 samples in 3.0s. You may wish to increase target time to 6.5s.
+Benchmarking arrow_f32_matrix/decode_ipc_and_borrow_slices_250k_x_384: Collecting 10 samples in estimated 6.4937 s (10 iterations)
+Benchmarking arrow_f32_matrix/decode_ipc_and_borrow_slices_250k_x_384: Analyzing
+arrow_f32_matrix/decode_ipc_and_borrow_slices_250k_x_384
+                        time:   [320.59 ms 322.17 ms 324.21 ms]
+Found 2 outliers among 10 measurements (20.00%)
+  2 (20.00%) high severe
+

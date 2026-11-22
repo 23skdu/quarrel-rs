@@ -1,0 +1,47 @@
+# Local reference baseline — NOT a cross-machine gate.
+# Refresh only on an idle, documented machine: make bench-iai-baseline
+recorded_utc: 2026-11-22T22:38:00Z
+counts_command: cargo bench --locked --manifest-path benches/iai/Cargo.toml --bench hot_kernels
+baseline_command: cargo bench --locked --manifest-path benches/iai/Cargo.toml --bench hot_kernels -- --save-baseline=committed
+rustc: rustc 1.100.0 (0ef1bc386 2026-11-09)
+valgrind: valgrind-3.26.0
+iai-callgrind: 0.16.1 (crate and runner)
+cpu: 12th Gen Intel(R) Core(TM) i7-12650H
+mem_total: 22.4 GiB
+
+    Finished `bench` profile [optimized] target(s) in 0.01s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running benches/hot_kernels.rs (benches/iai/target/release/build/quarrel-bench-iai/64856e95a5e080db/out/hot_kernels-64856e95a5e080db)
+hot_kernels::simd_kernels::dot_f32 dot_256:dot_inputs(256)
+  Instructions:                         705|705                  (No change)
+  L1 Hits:                             1110|1110                 (No change)
+  LL Hits:                                5|5                    (No change)
+  RAM Hits:                              46|46                   (No change)
+  Total read+write:                    1161|1161                 (No change)
+  Estimated Cycles:                    2745|2745                 (No change)
+hot_kernels::simd_kernels::dot_f32 dot_4096:dot_inputs(4096)
+  Instructions:                        2347|2347                 (No change)
+  L1 Hits:                             7010|7010                 (No change)
+  LL Hits:                              154|154                  (No change)
+  RAM Hits:                              51|51                   (No change)
+  Total read+write:                    7215|7215                 (No change)
+  Estimated Cycles:                    9565|9565                 (No change)
+hot_kernels::simd_kernels::softmax_into softmax_256:softmax_inputs(256)
+  Instructions:                       12684|12684                (No change)
+  L1 Hits:                            16734|16734                (No change)
+  LL Hits:                                5|5                    (No change)
+  RAM Hits:                              66|66                   (No change)
+  Total read+write:                   16805|16805                (No change)
+  Estimated Cycles:                   19069|19069                (No change)
+hot_kernels::simd_kernels::softmax_into softmax_4096:softmax_inputs(4096)
+  Instructions:                      193246|193246               (No change)
+  L1 Hits:                           256192|256192               (No change)
+  LL Hits:                              236|236                  (No change)
+  RAM Hits:                              71|71                   (No change)
+  Total read+write:                  256499|256499               (No change)
+  Estimated Cycles:                  259857|259857               (No change)
+
+Iai-Callgrind result: Ok. 4 without regressions; 0 regressed; 4 benchmarks finished in 0.84864s
+
+baseline: committed (saved under benches/iai/target/iai, not committed)
