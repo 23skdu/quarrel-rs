@@ -21,9 +21,11 @@ pub use dto::{
     ChatChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta,
     ChatMessage, ChatStreamChoice, CompletionChoice, CompletionRequest, CompletionResponse,
     EmbeddingList, EmbeddingObject, EmbeddingPayload, EmbeddingRequest, EmbeddingUsage,
-    EncodingFormat, ErrorDetail, ErrorEnvelope, HealthResponse, Model, ModelList,
-    OllamaChatMessage, OllamaChatRequest, OllamaChatResponse, OllamaGenerateRequest,
-    OllamaGenerateResponse, OllamaOptions, ReadyResponse, StringOrList, Usage,
+    EncodingFormat, ErrorDetail, ErrorEnvelope, FunctionDefinition, FunctionReference,
+    HealthResponse, Model, ModelList, NamedToolChoice, OllamaChatMessage, OllamaChatRequest,
+    OllamaChatResponse, OllamaGenerateRequest, OllamaGenerateResponse, OllamaOptions,
+    ReadyResponse, StringOrList, Tool, ToolCall, ToolCallDelta, ToolCallFunction,
+    ToolCallFunctionDelta, ToolChoice, ToolChoiceMode, Usage,
 };
 pub use error::ApiError;
 pub use ratelimit::RateLimiter;

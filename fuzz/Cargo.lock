@@ -1351,6 +1351,7 @@ name = "quarrel-gguf"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "clap",
  "half",
  "memmap2",
  "quarrel-simd",

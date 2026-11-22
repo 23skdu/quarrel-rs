@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use quarrel_api::{
     ApiError, ChatCompletionRequest, CompletionRequest, EmbeddingRequest, ErrorDetail,
     ErrorEnvelope, InferenceService, ModelList, OllamaChatRequest, OllamaGenerateRequest,
+    ToolChoice,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -16,6 +17,9 @@ use serde_json::Value;
 const CHAT_REQUEST: &str = include_str!("fixtures/chat_request.json");
 const CHAT_RESPONSE: &str = include_str!("fixtures/chat_response.json");
 const CHAT_STREAM: &str = include_str!("fixtures/chat_stream_events.json");
+const TOOL_CALL_REQUEST: &str = include_str!("fixtures/tool_call_request.json");
+const TOOL_CALL_RESPONSE: &str = include_str!("fixtures/tool_call_response.json");
+const TOOL_CALL_STREAM: &str = include_str!("fixtures/tool_call_stream_events.json");
 const COMPLETION_REQUEST: &str = include_str!("fixtures/completion_request.json");
 const COMPLETION_RESPONSE: &str = include_str!("fixtures/completion_response.json");
 const EMBEDDING_REQUEST: &str = include_str!("fixtures/embedding_request.json");
@@ -84,6 +88,26 @@ fn chat_stream_contract_replays() {
             assert_eq!(actual, expected);
         }
     }
+}
+
+#[test]
+fn tool_call_contract_replays() {
+    let request: ChatCompletionRequest = serde_json::from_str(TOOL_CALL_REQUEST).unwrap();
+    assert_eq!(request.tools.as_ref().unwrap().len(), 1);
+    assert!(matches!(request.tool_choice, Some(ToolChoice::Function(_))));
+    assert_matches_fixture(&service().chat(&request).unwrap(), TOOL_CALL_RESPONSE);
+}
+
+#[test]
+fn tool_call_stream_contract_replays() {
+    let request: ChatCompletionRequest = serde_json::from_str(TOOL_CALL_REQUEST).unwrap();
+    let events = service().chat_stream_events(&request).unwrap();
+    let streamed: Vec<Value> = events
+        .iter()
+        .map(|event| Value::String(event.clone()))
+        .collect();
+    let expected: Value = serde_json::from_str(TOOL_CALL_STREAM).unwrap();
+    assert_eq!(streamed, expected.as_array().unwrap().to_vec());
 }
 
 #[test]

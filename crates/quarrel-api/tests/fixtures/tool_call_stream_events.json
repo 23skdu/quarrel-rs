@@ -1,0 +1,8 @@
+[
+  "{\"id\":\"chatcmpl-cca0235df4474b6c\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}",
+  "{\"id\":\"chatcmpl-cca0235df4474b6c\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_b039ba028ccf7fa0\",\"type\":\"function\",\"function\":{\"name\":\"calculate\",\"arguments\":\"\"}}]}}]}",
+  "{\"id\":\"chatcmpl-cca0235df4474b6c\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"a\\\":1,\\\"\"}}]}}]}",
+  "{\"id\":\"chatcmpl-cca0235df4474b6c\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"b\\\":1}\"}}]}}]}",
+  "{\"id\":\"chatcmpl-cca0235df4474b6c\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}",
+  "[DONE]"
+]

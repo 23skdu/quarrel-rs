@@ -167,7 +167,7 @@ pub(crate) fn parse_header(bytes: &[u8]) -> Result<GgufHeader, GgufError> {
 }
 
 /// Byte length of a tensor, using quant block sizes where applicable.
-fn tensor_byte_len(dtype: DType, shape: &[u64], name: &str) -> Result<u64, GgufError> {
+pub(crate) fn tensor_byte_len(dtype: DType, shape: &[u64], name: &str) -> Result<u64, GgufError> {
     let elements = shape
         .iter()
         .try_fold(1u64, |acc, &dim| acc.checked_mul(dim))

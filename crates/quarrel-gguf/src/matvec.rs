@@ -496,7 +496,11 @@ fn unpack_k4_scale_min(j: usize, scales: &[u8]) -> (u8, u8) {
 }
 
 /// Q4_K: `d`/`dmin`, twelve packed scale/min bytes, then 128 nibble pairs.
-fn decode_q4_k(block: &[u8], base: usize, decoded: &mut [f32; QK_K]) -> Result<(), GgufError> {
+pub(crate) fn decode_q4_k(
+    block: &[u8],
+    base: usize,
+    decoded: &mut [f32; QK_K],
+) -> Result<(), GgufError> {
     let d = decode_f16_scale(&block[..2], base)?;
     let dmin = decode_f16_scale(&block[2..4], base)?;
     let packed = &block[4..16];
@@ -548,7 +552,11 @@ fn decode_q5_k(block: &[u8], base: usize, decoded: &mut [f32; QK_K]) -> Result<(
 }
 
 /// Q6_K: 128 low nibbles, 64 bytes of two high bits, 16 scales, then `d`.
-fn decode_q6_k(block: &[u8], base: usize, decoded: &mut [f32; QK_K]) -> Result<(), GgufError> {
+pub(crate) fn decode_q6_k(
+    block: &[u8],
+    base: usize,
+    decoded: &mut [f32; QK_K],
+) -> Result<(), GgufError> {
     let ql = &block[..128];
     let qh = &block[128..192];
     let scales = &block[192..208];

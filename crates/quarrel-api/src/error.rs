@@ -21,6 +21,9 @@ pub enum ApiError {
     /// The requested model is not present in the models directory.
     #[error("unknown model `{0}`; use GET /v1/models to list available models")]
     InvalidModel(String),
+    /// The `tools` or `tool_choice` combination is unsupported or malformed.
+    #[error("invalid tool choice: {0}")]
+    InvalidToolChoice(String),
     /// Authentication failed.
     #[error("invalid or missing API key")]
     Unauthorized,
@@ -46,6 +49,7 @@ impl ApiError {
             Self::NotFound(_)
             | Self::BadRequest(_)
             | Self::InvalidModel(_)
+            | Self::InvalidToolChoice(_)
             | Self::PayloadTooLarge => "invalid_request_error",
             Self::Unauthorized => "authentication_error",
             Self::RateLimited => "rate_limit_error",
@@ -60,6 +64,7 @@ impl ApiError {
             Self::NotFound(_) => "not_found",
             Self::BadRequest(_) => "invalid_request",
             Self::InvalidModel(_) => "invalid_model",
+            Self::InvalidToolChoice(_) => "invalid_tool_choice",
             Self::Unauthorized => "invalid_api_key",
             Self::RateLimited => "rate_limit_exceeded",
             Self::PayloadTooLarge => "payload_too_large",
@@ -73,6 +78,7 @@ impl ApiError {
     pub const fn param(&self) -> Option<&'static str> {
         match self {
             Self::InvalidModel(_) => Some("model"),
+            Self::InvalidToolChoice(_) => Some("tool_choice"),
             _ => None,
         }
     }
@@ -80,7 +86,9 @@ impl ApiError {
     const fn status(&self) -> StatusCode {
         match self {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::BadRequest(_) | Self::InvalidModel(_) => StatusCode::BAD_REQUEST,
+            Self::BadRequest(_) | Self::InvalidModel(_) | Self::InvalidToolChoice(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,

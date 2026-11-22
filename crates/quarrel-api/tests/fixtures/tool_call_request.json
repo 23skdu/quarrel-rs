@@ -1,0 +1,41 @@
+{
+  "model": "reference-tiny",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Use tools when the user asks for a calculation."
+    },
+    {
+      "role": "user",
+      "content": "Calculate 2 and 3."
+    }
+  ],
+  "temperature": 0,
+  "top_p": 1,
+  "seed": 42,
+  "max_tokens": 16,
+  "stream": false,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "calculate",
+        "description": "Adds two numbers",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "a": { "type": "number", "description": "First number" },
+            "b": { "type": "number", "description": "Second number" }
+          }
+        }
+      },
+      "parallel_tool_calls_hint": false
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": { "name": "calculate" }
+  },
+  "parallel_tool_calls": false,
+  "user": "sdk-fixture"
+}

@@ -357,6 +357,8 @@ async fn completions(
             max_tokens: request.max_tokens,
             seed: request.seed,
             stop: None,
+            tools: None,
+            tool_choice: None,
         };
         let sse: ChatEventSse = state.service.chat_stream(&chat_request)?;
         Ok(sse.into_response())
@@ -702,6 +704,42 @@ mod tests {
         assert_eq!(json["model"], "reference-tiny");
         assert_eq!(json["choices"][0]["message"]["role"], "assistant");
         assert_eq!(json["usage"]["completion_tokens"], 3);
+    }
+
+    #[tokio::test]
+    async fn chat_completion_supports_tool_calls_and_rejects_bad_choices() {
+        let mut payload = chat_request("reference-tiny");
+        payload["tools"] = serde_json::json!([{
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}
+            }
+        }]);
+        payload["tool_choice"] = serde_json::json!("required");
+
+        let response = post_json(test_state(None), "/v1/chat/completions", payload.clone()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            json["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "lookup"
+        );
+        assert!(
+            json["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap()
+                .starts_with('{')
+        );
+
+        payload["tool_choice"] = serde_json::json!("sometimes");
+        let response = post_json(test_state(None), "/v1/chat/completions", payload).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_envelope(response).await.error.code.as_deref(),
+            Some("invalid_tool_choice")
+        );
     }
 
     #[tokio::test]
@@ -1064,6 +1102,8 @@ mod tests {
                 max_tokens: None,
                 seed: None,
                 stop: None,
+                tools: None,
+                tool_choice: None,
             }
             .messages[0]
                 .content

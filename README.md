@@ -13,8 +13,9 @@ Apache Arrow based inference engine in Rust — a clean-room rewrite of
 ## What works today
 
 - `quarrel-server`: axum API with `/healthz`, `/readyz`, `/v1/models`, chat/completions/embeddings,
-  SSE streaming, `/metrics`, OpenAI-shaped errors, bearer-token auth, rate limiting and graceful
-  shutdown. Inference is served by the deterministic `ReferenceBackend` fixture.
+  SSE streaming, grammar-constrained tool calls, `/metrics`, OpenAI-shaped errors, bearer-token auth,
+  rate limiting and graceful shutdown. Inference is served by the deterministic `ReferenceBackend`
+  fixture.
 - Generated OpenAPI 3.1 document at `/openapi.json` with Swagger UI at `/docs`; contract replay
   tests and fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) are green.
 - Prometheus metrics on the same port; compose stack with Prometheus + Grafana provisioning and a
@@ -23,8 +24,10 @@ Apache Arrow based inference engine in Rust — a clean-room rewrite of
   ServiceMonitor and PrometheusRule.
 - Reproducible CPU, CUDA-base and distroless container images ([containers](docs/containers.md)).
 - `quarrel-core` (typed IDs, config, universal resolver, chat templates), `quarrel-simd`
-  (runtime-dispatched kernels), `quarrel-gguf` (GGUF v1–v3, mmap-backed tensor views, quant kernels),
-  `quarrel-engine` (scheduler, block-table KV, radix prefix cache, sampler, reference backend) and
+  (runtime-dispatched kernels), `quarrel-gguf` (GGUF v1–v3 read/write, mmap-backed tensor views,
+  quant kernels and `quarrel-quantize` CLI),
+  `quarrel-engine` (scheduler, batch backend trait, block-table KV, radix prefix cache, sampler,
+  reference backend), `quarrel-backend-cpu` (deterministic surrogate batch forward pass) and
   `quarrel-flight` (Arrow schemas, adapters, tonic Flight service and generate/embed paths).
 - `pythonsdk/`: `pyarrow.flight` client with generate/embed round trips, health action and a notebook
   example, verified against the local Flight example server.
@@ -57,7 +60,7 @@ Place `.gguf` models in `./models/` (mounted read-only into the container and ch
 
 | Interface | Endpoint | Status |
 |-----------|----------|--------|
-| OpenAI-compatible HTTP | `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models` | Implemented on the reference backend (no Go parity claim) |
+| OpenAI-compatible HTTP | `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models` | Implemented on the reference backend, including grammar-constrained tool calls (no Go parity claim) |
 | OpenAPI 3.1 / Swagger UI | `/openapi.json`, `/docs` | Implemented from handlers |
 | Embedded WebUI | `/` | Implemented (self-contained HTML, no CDN) |
 | Ollama compatibility | `/api/generate`, `/api/chat` | Implemented with NDJSON streaming on the reference backend |

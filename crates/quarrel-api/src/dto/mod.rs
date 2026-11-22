@@ -15,7 +15,8 @@ pub mod system;
 
 pub use chat::{
     ChatChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta,
-    ChatMessage, ChatStreamChoice,
+    ChatMessage, ChatStreamChoice, FunctionDefinition, FunctionReference, NamedToolChoice, Tool,
+    ToolCall, ToolCallDelta, ToolCallFunction, ToolCallFunctionDelta, ToolChoice, ToolChoiceMode,
 };
 pub use common::StringOrList;
 pub use completion::{CompletionChoice, CompletionRequest, CompletionResponse, Usage};

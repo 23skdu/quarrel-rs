@@ -5,6 +5,7 @@
 //! helpers for callers that only need one step of the pipeline.
 
 use crate::EngineError;
+use crate::grammar::{GrammarState, TokenAlphabet};
 use crate::to_usize;
 use quarrel_core::{SamplingParams, Token};
 use rand::Rng;
@@ -72,11 +73,58 @@ impl Sampler {
         params: &SamplingParams,
         previous_tokens: &[i32],
     ) -> Result<Token, EngineError> {
-        check_params(params)?;
-        require_finite(logits)?;
+        self.sample_inner(logits, logits, params, previous_tokens, false)
+    }
 
-        let mut scores = logits.to_vec();
-        apply_repetition_penalty(&mut scores, params, previous_tokens)?;
+    /// Samples one token constrained by a grammar state and advances that state.
+    ///
+    /// The active [`TokenAlphabet`] maps token ids to strings; every id that the
+    /// state would reject is masked to `-inf` before the normal sampling
+    /// pipeline runs, and the returned state has consumed the sampled token.
+    /// The returned token's log-probability is computed from the *unmasked*
+    /// logits, which must be finite just as for [`Self::sample`]. Only ids in
+    /// `0..logits.len()` can participate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::GrammarNoAllowedTokens`] when no alphabet id is
+    /// legal in the current state, grammar errors from advancing the state, and
+    /// the same parameter/logit errors as [`Self::sample`]. The state is left
+    /// unchanged on any error.
+    pub fn sample_with_grammar<'g>(
+        &mut self,
+        logits: &[f32],
+        params: &SamplingParams,
+        previous_tokens: &[i32],
+        alphabet: &TokenAlphabet,
+        state: &GrammarState<'g>,
+    ) -> Result<(Token, GrammarState<'g>), EngineError> {
+        require_finite(logits)?;
+        let mut masked = logits.to_vec();
+        state.mask_logits(alphabet, &mut masked)?;
+        let token = self.sample_inner(&masked, logits, params, previous_tokens, true)?;
+        let mut next = state.clone();
+        next.advance(alphabet, token.id)?;
+        Ok((token, next))
+    }
+
+    fn sample_inner(
+        &mut self,
+        scores_input: &[f32],
+        logprob_logits: &[f32],
+        params: &SamplingParams,
+        previous_tokens: &[i32],
+        masked: bool,
+    ) -> Result<Token, EngineError> {
+        check_params(params)?;
+        if masked {
+            require_finite_or_neg_inf(scores_input)?;
+        } else {
+            require_finite(scores_input)?;
+        }
+
+        let mut scores = scores_input.to_vec();
+        apply_repetition_penalty(&mut scores, params, previous_tokens, masked)?;
 
         let stop_mask = stop_mask(params, scores.len());
         let has_alternative = stop_mask.iter().any(|&stopped| !stopped);
@@ -91,7 +139,7 @@ impl Sampler {
         let temperature = params.temperature.to_f64();
         if temperature == 0.0 {
             let index = argmax_with_neg_inf(&scores)?;
-            return token_at(logits, index, &stop_mask);
+            return token_at(logprob_logits, index, &stop_mask);
         }
 
         scale_by_temperature(&mut scores, temperature)?;
@@ -109,7 +157,7 @@ impl Sampler {
             WeightedIndex::new(&weights).map_err(|_| EngineError::InvalidLogits { index: 0 })?;
         let index = self.rng.sample(distribution);
 
-        token_at(logits, index, &stop_mask)
+        token_at(logprob_logits, index, &stop_mask)
     }
 }
 
@@ -183,6 +231,19 @@ fn require_finite(logits: &[f32]) -> Result<(), EngineError> {
     Ok(())
 }
 
+/// Grammar masking legitimately uses `-inf`; all other non-finite values remain invalid.
+fn require_finite_or_neg_inf(logits: &[f32]) -> Result<(), EngineError> {
+    if logits.is_empty() {
+        return Err(EngineError::EmptyLogits);
+    }
+    for (index, &value) in logits.iter().enumerate() {
+        if value.is_nan() || value == f32::INFINITY {
+            return Err(EngineError::InvalidLogits { index });
+        }
+    }
+    Ok(())
+}
+
 fn check_params(params: &SamplingParams) -> Result<(), EngineError> {
     let invalid = || EngineError::InvalidParams {
         reason: "quarrel-core rejected the sampling parameters",
@@ -208,6 +269,7 @@ fn apply_repetition_penalty(
     scores: &mut [f32],
     params: &SamplingParams,
     previous_tokens: &[i32],
+    masked: bool,
 ) -> Result<(), EngineError> {
     let penalty = params.repetition_penalty.to_f64();
     if penalty == 1.0 || previous_tokens.is_empty() {
@@ -219,6 +281,9 @@ fn apply_repetition_penalty(
         }
         let index = token as usize;
         if let Some(score) = scores.get_mut(index) {
+            if masked && *score == f32::NEG_INFINITY {
+                continue;
+            }
             // The usual GPT2-style penalty: penalise positive logits by
             // division and negative ones by multiplication.
             *score = if *score > 0.0 {

@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 bytes.workspace = true
+clap.workspace = true
 half.workspace = true
 memmap2.workspace = true
 quarrel-simd.workspace = true
@@ -29,3 +30,7 @@ harness = false
 [[bench]]
 name = "matvec"
 harness = false
+
+[[bin]]
+name = "quarrel-quantize"
+path = "src/bin/quarrel-quantize.rs"

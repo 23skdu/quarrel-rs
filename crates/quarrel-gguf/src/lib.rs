@@ -1,4 +1,10 @@
-//! GGUF v1-v3 reader with borrowed tensor views and allocation-free quant kernels.
+//! GGUF v1-v3 reader, deterministic writer and allocation-free quant kernels.
+//!
+//! [`writer`] builds canonical GGUF v1-v3 files from typed metadata and encoded
+//! tensor payloads. Its [`writer::requantize_gguf`] helper converts F32/F16
+//! tensors to F32, F16, Q8_0, Q4_K or Q6_K while preserving the input version,
+//! metadata and tensor layout. The `quarrel-quantize` binary wraps that helper:
+//! `quarrel-quantize INPUT OUTPUT DTYPE`.
 //!
 //! The parser is built entirely from bounds-checked little-endian slice reads;
 //! it never panics on untrusted input. [`GgufFile`] parses bytes borrowed from
@@ -22,12 +28,15 @@
 //! # }
 //! ```
 
+#![deny(missing_docs)]
+
 mod dtype;
 mod error;
 mod file;
 mod header;
 pub mod matvec;
 pub mod quant;
+pub mod writer;
 
 #[cfg(test)]
 mod fixture;
@@ -38,3 +47,4 @@ pub use dtype::{DType, GgufVersion};
 pub use error::GgufError;
 pub use file::{GgufFile, GgufMmap, TensorView};
 pub use header::{GgufHeader, MetadataValue, TensorDescriptor};
+pub use writer::GgufWriter;

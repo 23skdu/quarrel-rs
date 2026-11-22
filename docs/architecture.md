@@ -35,7 +35,7 @@ flowchart TB
     end
 
     subgraph Backends["Execution backends"]
-        Cpu["quarrel-backend-cpu ⏳<br/>CPU forward pass"]
+        Cpu["quarrel-backend-cpu ✅<br/>batch CPU forward pass"]
         Cuda["quarrel-backend-cuda ⏳<br/>feature-gated"]
         Metal["quarrel-backend-metal ⏳<br/>macOS only"]
     end
@@ -74,14 +74,14 @@ flowchart TB
 |---------|----------------|--------|
 | `quarrel-core` | Typed IDs, request/response models, sampling params, config, chat templates, model resolver, non-exhaustive errors | ✅ |
 | `quarrel-simd` | Scalar reference math and runtime-dispatched SIMD; the only home for hot-path `unsafe` | ✅ |
-| `quarrel-gguf` | GGUF v1–v3 parser, `memmap2` ownership, typed tensor views, quant dequant/dot kernels | ✅ |
-| `quarrel-engine` | Scheduler, paged KV cache, radix prefix cache, sampler, health audit, backend trait, reference backend | ✅ |
+| `quarrel-gguf` | GGUF v1–v3 parser/writer, `memmap2` ownership, typed tensor views, quant kernels, `quarrel-quantize` CLI | ✅ |
+| `quarrel-engine` | Scheduler, batch backend trait, paged KV cache, radix prefix cache, sampler with grammar PDA, health audit, reference backend | ✅ |
 | `quarrel-flight` | Canonical Arrow schemas, zero-copy adapters, generate/embed Flight service and IPC golden fixtures | ✅ |
 | `pythonsdk` | `pyarrow.flight` client, pure-Python schema specs and notebook example | ✅ |
-| `quarrel-api` | OpenAI/Ollama DTOs, axum handlers, SSE/NDJSON streaming, generated OpenAPI document, embedded WebUI | ✅ |
+| `quarrel-api` | OpenAI/Ollama DTOs, axum handlers, SSE/NDJSON streaming, grammar-constrained tool calls, generated OpenAPI document, embedded WebUI | ✅ |
 | `quarrel-server` | CLI/config parsing and process lifecycle; delegates to the libraries above | ✅ |
 | `quarrel-observability` | Metric constants, recorder, tracing layers and OTLP feature (currently living in `quarrel-server`) | ⏳ |
-| `quarrel-backend-cpu` | Default execution backend | ⏳ |
+| `quarrel-backend-cpu` | Batch-aware CPU backend using dispatched SIMD with a deterministic scalar fallback (surrogate weights, not Go parity) | ✅ |
 | `quarrel-backend-cuda` / `quarrel-backend-metal` | Partial offload behind feature flags | ⏳ |
 
 `quarrel-server` is intentionally thin: all behaviour lives in libraries so integration tests and

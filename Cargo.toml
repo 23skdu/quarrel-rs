@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/quarrel-api",
+    "crates/quarrel-backend-cpu",
     "crates/quarrel-core",
     "crates/quarrel-engine",
     "crates/quarrel-flight",

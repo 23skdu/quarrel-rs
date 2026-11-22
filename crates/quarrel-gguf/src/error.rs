@@ -152,4 +152,48 @@ pub enum GgufError {
     /// A quant block or dtype-specific invariant was violated by the caller.
     #[error("invalid quant argument: {0}")]
     InvalidQuantArgument(String),
+
+    /// A writer or requantizer input cannot be represented in the requested layout.
+    #[error("cannot encode {what}: {reason}")]
+    EncodeError {
+        /// Description of the value that could not be encoded.
+        what: &'static str,
+        /// Why the value was rejected.
+        reason: String,
+    },
+
+    /// Two tensors with the same name were supplied to the writer.
+    #[error("duplicate tensor name: {0}")]
+    DuplicateTensorName(String),
+
+    /// A tensor payload does not match the length implied by its descriptor.
+    #[error("tensor {name:?} has {actual} bytes; expected {expected}")]
+    InvalidTensorLength {
+        /// Tensor name, for diagnostics.
+        name: String,
+        /// Byte length implied by the tensor shape and dtype.
+        expected: u64,
+        /// Number of bytes supplied by the caller.
+        actual: u64,
+    },
+
+    /// A source or target dtype cannot take part in a requantization.
+    #[error("cannot requantize from {from:?} to {to:?}")]
+    UnsupportedRequantization {
+        /// Dtype stored in the input file.
+        from: DType,
+        /// Requested output dtype.
+        to: DType,
+    },
+
+    /// A value is outside the representable range of the target dtype.
+    #[error("value {value} at index {index} is out of range for {dtype:?}")]
+    QuantizationRange {
+        /// Target dtype that cannot represent the value.
+        dtype: DType,
+        /// Logical element index of the offending value.
+        index: usize,
+        /// Offending value.
+        value: f32,
+    },
 }

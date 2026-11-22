@@ -5,7 +5,7 @@
 //! semantic meaning. Model ids, however, are real: they come from `quarrel-core`'s GGUF resolver.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     convert::Infallible,
     path::{Path, PathBuf},
     pin::Pin,
@@ -24,6 +24,7 @@ use quarrel_core::{
 use quarrel_engine::{
     EngineError,
     backend::{Backend, ReferenceBackend, generate},
+    grammar::{Grammar, TokenAlphabet, generate_with_grammar},
 };
 use tokio::{sync::mpsc, task::JoinHandle, time::Instant};
 
@@ -32,9 +33,10 @@ use crate::{
         ChatChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta,
         ChatMessage, ChatStreamChoice, CompletionChoice, CompletionRequest, CompletionResponse,
         EmbeddingList, EmbeddingObject, EmbeddingPayload, EmbeddingRequest, EmbeddingUsage,
-        EncodingFormat, Model, ModelList, OllamaChatMessage, OllamaChatRequest, OllamaChatResponse,
-        OllamaGenerateRequest, OllamaGenerateResponse, OllamaOptions, StringOrList, Usage,
-        ollama::format_timestamp,
+        EncodingFormat, FunctionDefinition, Model, ModelList, OllamaChatMessage, OllamaChatRequest,
+        OllamaChatResponse, OllamaGenerateRequest, OllamaGenerateResponse, OllamaOptions,
+        StringOrList, ToolCall, ToolCallDelta, ToolCallFunction, ToolCallFunctionDelta, ToolChoice,
+        ToolChoiceMode, Usage, ollama::format_timestamp,
     },
     error::ApiError,
     tokenizer,
@@ -165,6 +167,9 @@ impl InferenceService {
             })
             .collect();
         let prompt = chat_template::fallback(&messages);
+        if let Some(plan) = plan_tool_call(request, &prompt)? {
+            return self.tool_call_response(request, &model, &prompt, &plan);
+        }
         let tokens = self.generate(&model, &prompt, request)?;
 
         let text = apply_stops(
@@ -189,6 +194,7 @@ impl InferenceService {
                 index: 0,
                 message: ChatMessage::new("assistant", text.value),
                 finish_reason: Some(finish_reason.to_owned()),
+                tool_calls: None,
             }],
             usage,
         ))
@@ -408,6 +414,9 @@ impl InferenceService {
             })
             .collect();
         let prompt = chat_template::fallback(&messages);
+        if let Some(plan) = plan_tool_call(request, &prompt)? {
+            return self.tool_call_events(request, &model, &prompt, &plan);
+        }
         let tokens = self.generate(&model, &prompt, request)?;
         let text = apply_stops(
             &tokenizer::decode(&token_ids_of(&tokens)),
@@ -432,6 +441,7 @@ impl InferenceService {
                 delta: ChatDelta {
                     role: Some("assistant".to_owned()),
                     content: None,
+                    tool_calls: None,
                 },
                 finish_reason: None,
             }],
@@ -460,6 +470,188 @@ impl InferenceService {
         )));
         events.push(StreamEvent::Done);
         Ok(events)
+    }
+
+    fn tool_call_response(
+        &self,
+        request: &ChatCompletionRequest,
+        model: &ModelId,
+        prompt: &str,
+        plan: &ToolCallPlan,
+    ) -> Result<ChatCompletionResponse, ApiError> {
+        let generated = self.generate_tool_call(prompt, plan, request.seed.unwrap_or(0))?;
+        let id = self.request_id(
+            CHAT_ID_PREFIX,
+            model.as_str(),
+            prompt,
+            &request.temperature,
+            &request.seed,
+        );
+        let message = ChatMessage {
+            role: "assistant".to_owned(),
+            content: String::new(),
+            tool_calls: Some(vec![generated.call.clone()]),
+            tool_call_id: None,
+        };
+        Ok(ChatCompletionResponse::new(
+            id,
+            self.created_at,
+            model.as_str().to_owned(),
+            vec![ChatChoice {
+                index: 0,
+                message,
+                finish_reason: Some("tool_calls".to_owned()),
+                tool_calls: Some(vec![generated.call]),
+            }],
+            Usage::new(
+                encode_prompt(prompt)?.len() as u32,
+                generated.completion_tokens,
+            ),
+        ))
+    }
+
+    fn tool_call_events(
+        &self,
+        request: &ChatCompletionRequest,
+        model: &ModelId,
+        prompt: &str,
+        plan: &ToolCallPlan,
+    ) -> Result<Vec<StreamEvent>, ApiError> {
+        let generated = self.generate_tool_call(prompt, plan, request.seed.unwrap_or(0))?;
+        let id = self.request_id(
+            CHAT_ID_PREFIX,
+            model.as_str(),
+            prompt,
+            &request.temperature,
+            &request.seed,
+        );
+        let model_name = model.as_str().to_owned();
+        let chunk = |delta: ChatDelta, finish_reason: Option<&str>| {
+            chunk_event(&ChatCompletionChunk::new(
+                id.clone(),
+                self.created_at,
+                model_name.clone(),
+                vec![ChatStreamChoice {
+                    index: 0,
+                    delta,
+                    finish_reason: finish_reason.map(ToOwned::to_owned),
+                }],
+            ))
+        };
+        let mut events = vec![chunk(
+            ChatDelta {
+                role: Some("assistant".to_owned()),
+                content: None,
+                tool_calls: None,
+            },
+            None,
+        )];
+        events.push(chunk(
+            ChatDelta::tool_calls(vec![ToolCallDelta {
+                index: 0,
+                id: Some(generated.call.id.clone()),
+                kind: Some(generated.call.kind.clone()),
+                function: Some(ToolCallFunctionDelta {
+                    name: Some(generated.call.function.name.clone()),
+                    arguments: Some(String::new()),
+                }),
+            }]),
+            None,
+        ));
+        let characters: Vec<char> = generated.call.function.arguments.chars().collect();
+        for fragment in characters.chunks(8) {
+            events.push(chunk(
+                ChatDelta::tool_calls(vec![ToolCallDelta {
+                    index: 0,
+                    id: None,
+                    kind: None,
+                    function: Some(ToolCallFunctionDelta {
+                        name: None,
+                        arguments: Some(fragment.iter().collect()),
+                    }),
+                }]),
+                None,
+            ));
+        }
+        events.push(chunk(ChatDelta::default(), Some("tool_calls")));
+        events.push(StreamEvent::Done);
+        Ok(events)
+    }
+
+    fn generate_tool_call(
+        &self,
+        prompt: &str,
+        plan: &ToolCallPlan,
+        seed: u64,
+    ) -> Result<GeneratedToolCall, ApiError> {
+        let alphabet = tool_alphabet(plan)?;
+        let name_token = json(&plan.function.name)?;
+        let key_tokens = plan
+            .arguments
+            .keys()
+            .map(json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut value_tokens = Vec::new();
+        for value in plan.arguments.values() {
+            let token = json(value)?;
+            if !value_tokens.contains(&token) {
+                value_tokens.push(token);
+            }
+        }
+        let grammar = Grammar::json_tool_call_with(&name_token, &key_tokens, &value_tokens);
+        let mut params = SamplingParams::new();
+        params.temperature = 0.0;
+        params.top_p = 1.0;
+        params.top_k = 0;
+        params.repetition_penalty = 1.0;
+        params.stop_token_ids.clear();
+        params.max_tokens = 64;
+        let prompt_ids = encode_prompt(prompt)?;
+        let output = generate_with_grammar(
+            |context| {
+                let mut ids = prompt_ids.clone();
+                ids.extend_from_slice(context);
+                self.backend.forward(&ids)
+            },
+            &params,
+            seed,
+            64,
+            &alphabet,
+            &grammar,
+        )
+        .map_err(|error| ApiError::Engine(error.to_string()))?;
+        if !output.accepting {
+            return Err(ApiError::Engine(
+                "tool call grammar did not reach an accepting state".to_owned(),
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_str(&output.text)
+            .map_err(|error| ApiError::Engine(error.to_string()))?;
+        let name = value
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| ApiError::Engine("generated tool call has no name".to_owned()))?;
+        let arguments = value
+            .get("arguments")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| ApiError::Engine("generated tool call has no arguments".to_owned()))?;
+        let arguments = serde_json::to_string(arguments)
+            .map_err(|error| ApiError::Engine(error.to_string()))?;
+        let id = format!(
+            "call_{}",
+            stable_id("tool", &[name, &arguments]).trim_start_matches("tool-")
+        );
+        Ok(GeneratedToolCall {
+            call: ToolCall {
+                id,
+                kind: "function".to_owned(),
+                function: ToolCallFunction {
+                    name: name.to_owned(),
+                    arguments,
+                },
+            },
+            completion_tokens: output.tokens.len() as u32,
+        })
     }
 
     fn generate(
@@ -541,6 +733,130 @@ impl InferenceService {
                 other => ApiError::BadRequest(other.to_string()),
             })
     }
+}
+
+#[derive(Debug, Clone)]
+struct ToolCallPlan {
+    function: FunctionDefinition,
+    arguments: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedToolCall {
+    call: ToolCall,
+    completion_tokens: u32,
+}
+
+/// Resolves `tools`/`tool_choice` before any generation so failures are regular 400s.
+fn plan_tool_call(
+    request: &ChatCompletionRequest,
+    prompt: &str,
+) -> Result<Option<ToolCallPlan>, ApiError> {
+    let invalid = |reason: &str| ApiError::InvalidToolChoice(reason.to_owned());
+    let Some(tools) = request.tools.as_ref().filter(|tools| !tools.is_empty()) else {
+        if request.tool_choice.is_some() {
+            return Err(invalid("tool_choice requires at least one tool"));
+        }
+        return Ok(None);
+    };
+    let functions: Vec<&FunctionDefinition> = tools
+        .iter()
+        .filter(|tool| tool.kind == "function")
+        .map(|tool| &tool.function)
+        .collect();
+    let selected = match request.tool_choice.as_ref() {
+        None | Some(ToolChoice::Mode(ToolChoiceMode::Auto | ToolChoiceMode::None)) => {
+            return Ok(None);
+        }
+        Some(ToolChoice::Mode(ToolChoiceMode::Required)) => functions.first().copied(),
+        Some(ToolChoice::Function(named)) => {
+            if named.kind != "function" {
+                return Err(invalid("only type=function tool choices are supported"));
+            }
+            functions
+                .iter()
+                .copied()
+                .find(|function| function.name == named.function.name)
+        }
+        Some(ToolChoice::Unsupported(mode)) => {
+            return Err(invalid(&format!("unsupported tool_choice mode '{mode}'")));
+        }
+    };
+    let function =
+        selected.ok_or_else(|| invalid("requested function is not declared in tools"))?;
+    if function.name.trim().is_empty() {
+        return Err(invalid("function name must not be empty"));
+    }
+    if let Some(parameters) = &function.parameters
+        && !parameters.is_object()
+        && !parameters.is_null()
+    {
+        return Err(invalid("function parameters must be a JSON object"));
+    }
+    Ok(Some(ToolCallPlan {
+        function: function.clone(),
+        arguments: flat_arguments(function, prompt),
+    }))
+}
+
+/// Selects up to three flat properties from the function's JSON-schema parameters.
+fn flat_arguments(
+    function: &FunctionDefinition,
+    prompt: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut arguments = BTreeMap::new();
+    let Some(parameters) = function.parameters.as_ref() else {
+        return arguments;
+    };
+    let Some(properties) = parameters
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return arguments;
+    };
+    let text: String = prompt.chars().take(48).collect();
+    for (name, schema) in properties {
+        if name.is_empty() || name.contains('"') {
+            continue;
+        }
+        let value = match schema.get("type").and_then(serde_json::Value::as_str) {
+            Some("string") => serde_json::Value::String(text.clone()),
+            Some("number" | "integer") => serde_json::Value::from(1),
+            Some("boolean") => serde_json::Value::Bool(true),
+            Some("null") => serde_json::Value::Null,
+            _ => continue,
+        };
+        arguments.insert(name.clone(), value);
+        if arguments.len() == 3 {
+            break;
+        }
+    }
+    arguments
+}
+
+fn json<T: serde::Serialize>(value: &T) -> Result<String, ApiError> {
+    serde_json::to_string(value).map_err(|error| ApiError::Engine(error.to_string()))
+}
+
+fn push_token(tokens: &mut Vec<(i32, String)>, text: String) {
+    if !tokens.iter().any(|(_, existing)| existing == &text) {
+        tokens.push((tokens.len() as i32, text));
+    }
+}
+
+/// Small alphabet whose strings are exactly the fragments of this tool call.
+fn tool_alphabet(plan: &ToolCallPlan) -> Result<TokenAlphabet, ApiError> {
+    let mut tokens: Vec<(i32, String)> = Vec::new();
+    for text in ["{", r#""name""#, ":", r#""arguments""#, ","] {
+        push_token(&mut tokens, text.to_owned());
+    }
+    push_token(&mut tokens, json(&plan.function.name)?);
+    for (name, value) in &plan.arguments {
+        push_token(&mut tokens, json(name)?);
+        push_token(&mut tokens, json(value)?);
+    }
+    push_token(&mut tokens, "}".to_owned());
+    Ok(TokenAlphabet::from_strings(tokens))
 }
 
 fn token_ids_of(tokens: &[Token]) -> Vec<i32> {
@@ -734,6 +1050,8 @@ fn generate_chat_request(request: &OllamaGenerateRequest) -> ChatCompletionReque
         max_tokens: num_predict,
         seed,
         stop,
+        tools: None,
+        tool_choice: None,
     }
 }
 
@@ -763,6 +1081,8 @@ fn chat_request_from_ollama(request: &OllamaChatRequest) -> ChatCompletionReques
         max_tokens: num_predict,
         seed,
         stop,
+        tools: None,
+        tool_choice: None,
     }
 }
 
@@ -963,6 +1283,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::dto::{FunctionReference, NamedToolChoice, Tool};
 
     fn fixture_models_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/models")
@@ -984,6 +1305,8 @@ mod tests {
             max_tokens: Some(5),
             seed: Some(42),
             stop: None,
+            tools: None,
+            tool_choice: None,
         }
     }
 
@@ -1056,6 +1379,98 @@ mod tests {
         assert_eq!(completion.choices[0].index, 0);
         assert_eq!(completion.choices[1].index, 1);
         assert_eq!(completion.usage.prompt_tokens, 10);
+    }
+
+    fn tool_request(choice: Option<ToolChoice>) -> ChatCompletionRequest {
+        let mut request = chat_request("reference-tiny", "calculate 2 and 3");
+        request.tools = Some(vec![Tool::function(FunctionDefinition {
+            name: "calculate".to_owned(),
+            description: Some("Adds two numbers".to_owned()),
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "a": { "type": "number" },
+                    "b": { "type": "number" }
+                }
+            })),
+        })]);
+        request.tool_choice = choice;
+        request
+    }
+
+    #[test]
+    fn tool_calls_use_the_grammar_for_text_and_streaming_responses() {
+        let service = service();
+        let request = tool_request(Some(ToolChoice::Mode(ToolChoiceMode::Required)));
+        let response = service.chat(&request).unwrap();
+        assert_eq!(
+            response.choices[0].finish_reason.as_deref(),
+            Some("tool_calls")
+        );
+        let call = &response.choices[0].message.tool_calls.as_ref().unwrap()[0];
+        assert_eq!(call.function.name, "calculate");
+        let arguments: serde_json::Value = serde_json::from_str(&call.function.arguments).unwrap();
+        assert!(arguments.is_object());
+        assert_eq!(
+            response.choices[0].tool_calls.as_ref(),
+            response.choices[0].message.tool_calls.as_ref()
+        );
+
+        let streamed = service.chat_stream_events(&request).unwrap();
+        assert!(
+            streamed
+                .first()
+                .is_some_and(|event| event.contains("\"role\":\"assistant\""))
+        );
+        assert!(
+            streamed
+                .iter()
+                .any(|event| event.contains("\"tool_calls\""))
+        );
+        assert!(
+            streamed
+                .iter()
+                .any(|event| event.contains("\"finish_reason\":\"tool_calls\""))
+        );
+        assert_eq!(streamed.last().map(String::as_str), Some("[DONE]"));
+
+        let mut auto = request;
+        auto.tool_choice = Some(ToolChoice::Mode(ToolChoiceMode::Auto));
+        let legacy = service.chat(&auto).unwrap();
+        assert!(legacy.choices[0].message.tool_calls.is_none());
+        assert!(legacy.choices[0].tool_calls.is_none());
+        assert_ne!(
+            legacy.choices[0].finish_reason.as_deref(),
+            Some("tool_calls")
+        );
+    }
+
+    #[test]
+    fn invalid_tool_choices_are_typed_400_errors() {
+        let service = service();
+        let mut request = tool_request(Some(ToolChoice::Unsupported("sometimes".to_owned())));
+        assert_eq!(
+            service.chat(&request).unwrap_err(),
+            ApiError::InvalidToolChoice("unsupported tool_choice mode 'sometimes'".to_owned())
+        );
+
+        request.tool_choice = Some(ToolChoice::Function(NamedToolChoice {
+            kind: "function".to_owned(),
+            function: FunctionReference {
+                name: "missing".to_owned(),
+            },
+        }));
+        assert_eq!(
+            service.chat(&request).unwrap_err(),
+            ApiError::InvalidToolChoice("requested function is not declared in tools".to_owned())
+        );
+
+        request.tool_choice = Some(ToolChoice::Mode(ToolChoiceMode::Required));
+        request.tools = None;
+        assert_eq!(
+            service.chat(&request).unwrap_err(),
+            ApiError::InvalidToolChoice("tool_choice requires at least one tool".to_owned())
+        );
     }
 
     #[test]

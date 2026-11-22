@@ -543,7 +543,7 @@
               "string",
               "null"
             ],
-            "description": "`stop` or `length`, matching OpenAI's finish-reason vocabulary."
+            "description": "`stop`, `length` or `tool_calls`, matching OpenAI's finish-reason vocabulary."
           },
           "index": {
             "type": "integer",
@@ -554,6 +554,16 @@
           "message": {
             "$ref": "#/components/schemas/ChatMessage",
             "description": "Generated message; the role is always `assistant`."
+          },
+          "tool_calls": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "description": "Tool calls emitted with this choice, absent for ordinary text responses."
           }
         }
       },
@@ -666,6 +676,27 @@
             "format": "float",
             "description": "Softmax temperature. `0.0` selects greedy decoding."
           },
+          "tool_choice": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ToolChoice",
+                "description": "How the service may use the declared tools."
+              }
+            ]
+          },
+          "tools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Tool"
+            },
+            "description": "Optional tool definitions; requests without tools keep the legacy response shape."
+          },
           "top_k": {
             "type": [
               "integer",
@@ -745,6 +776,16 @@
               "null"
             ],
             "description": "Role, present only in the first chunk of a stream."
+          },
+          "tool_calls": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ToolCallDelta"
+            },
+            "description": "Incremental tool-call fragments; absent on ordinary text streams."
           }
         }
       },
@@ -752,17 +793,33 @@
         "type": "object",
         "description": "A chat message in OpenAI role/content form.",
         "required": [
-          "role",
-          "content"
+          "role"
         ],
         "properties": {
           "content": {
             "type": "string",
-            "description": "Message content."
+            "description": "Message content. A JSON `null` from OpenAI SDKs is accepted as empty text."
           },
           "role": {
             "type": "string",
             "description": "One of `system`, `user`, `assistant` or `tool`."
+          },
+          "tool_call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of the tool call this message answers, for `role: \"tool\"`."
+          },
+          "tool_calls": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "description": "Tool calls emitted by an assistant message, when present."
           }
         }
       },
@@ -1116,6 +1173,42 @@
           }
         }
       },
+      "FunctionDefinition": {
+        "type": "object",
+        "description": "An OpenAI function definition carried by a [`Tool`].",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human-readable description."
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name used by `tool_choice` and emitted in tool calls."
+          },
+          "parameters": {
+            "description": "JSON-schema parameters; only flat object properties are used for generation."
+          }
+        }
+      },
+      "FunctionReference": {
+        "type": "object",
+        "description": "Function reference inside [`NamedToolChoice`].",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of a function declared in the request's `tools`."
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "description": "`GET /healthz` liveness response.",
@@ -1170,6 +1263,24 @@
           "object": {
             "type": "string",
             "description": "Always `list`."
+          }
+        }
+      },
+      "NamedToolChoice": {
+        "type": "object",
+        "description": "Object form of OpenAI's `tool_choice`.",
+        "required": [
+          "type",
+          "function"
+        ],
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/FunctionReference",
+            "description": "Function to call."
+          },
+          "type": {
+            "type": "string",
+            "description": "Discriminator; must be `function`."
           }
         }
       },
@@ -1487,6 +1598,151 @@
           }
         ],
         "description": "A JSON value that may be a single string or an array of strings.\n\nUsed by `input` on embedding requests, `prompt` on completion requests and `stop` on generation\nrequests. Keeping the untagged representation in the DTO means handlers never have to accept\n`serde_json::Value` and lose compile-time checking."
+      },
+      "Tool": {
+        "type": "object",
+        "description": "An OpenAI tool description. Only `type: \"function\"` is supported.",
+        "required": [
+          "type",
+          "function"
+        ],
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/FunctionDefinition",
+            "description": "Function name, description and JSON-schema parameters."
+          },
+          "type": {
+            "type": "string",
+            "description": "Discriminator; must be `function`."
+          }
+        }
+      },
+      "ToolCall": {
+        "type": "object",
+        "description": "A complete tool call emitted in an assistant message.",
+        "required": [
+          "id",
+          "type",
+          "function"
+        ],
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/ToolCallFunction",
+            "description": "Function name and JSON-encoded arguments string."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable call identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Discriminator; always `function` for generated calls."
+          }
+        }
+      },
+      "ToolCallDelta": {
+        "type": "object",
+        "description": "One incremental tool-call delta in an SSE chunk.",
+        "required": [
+          "index"
+        ],
+        "properties": {
+          "function": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallFunctionDelta",
+                "description": "Function fragment."
+              }
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Call id, present on the first delta of a tool call."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based tool-call index, matching OpenAI's streaming shape.",
+            "minimum": 0
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Discriminator, present on the first delta of a tool call."
+          }
+        }
+      },
+      "ToolCallFunction": {
+        "type": "object",
+        "description": "Function payload of a [`ToolCall`].",
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "string",
+            "description": "Arguments encoded as a JSON object string."
+          },
+          "name": {
+            "type": "string",
+            "description": "Function name."
+          }
+        }
+      },
+      "ToolCallFunctionDelta": {
+        "type": "object",
+        "description": "Function fragment inside a [`ToolCallDelta`].",
+        "properties": {
+          "arguments": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fragment of the JSON-encoded arguments string."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Function name, present on the first delta of a tool call."
+          }
+        }
+      },
+      "ToolChoice": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ToolChoiceMode",
+            "description": "`none`, `auto` or `required`."
+          },
+          {
+            "$ref": "#/components/schemas/NamedToolChoice",
+            "description": "Force the named function."
+          },
+          {
+            "type": "string",
+            "description": "Any other string, preserved so the service can return a typed 400."
+          }
+        ],
+        "description": "OpenAI `tool_choice`: a mode string, a named function object, or an unsupported string."
+      },
+      "ToolChoiceMode": {
+        "type": "string",
+        "description": "String forms of OpenAI's `tool_choice`.",
+        "enum": [
+          "none",
+          "auto",
+          "required"
+        ]
       },
       "Usage": {
         "type": "object",

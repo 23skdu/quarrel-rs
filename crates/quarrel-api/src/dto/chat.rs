@@ -1,6 +1,6 @@
 //! Chat-completion requests, responses and SSE chunk types.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
 use super::common::StringOrList;
@@ -11,8 +11,15 @@ use super::completion::Usage;
 pub struct ChatMessage {
     /// One of `system`, `user`, `assistant` or `tool`.
     pub role: String,
-    /// Message content.
+    /// Message content. A JSON `null` from OpenAI SDKs is accepted as empty text.
+    #[serde(default, deserialize_with = "content_or_empty")]
     pub content: String,
+    /// Tool calls emitted by an assistant message, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// Identifier of the tool call this message answers, for `role: "tool"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
@@ -22,8 +29,152 @@ impl ChatMessage {
         Self {
             role: role.into(),
             content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
+}
+
+fn content_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// An OpenAI tool description. Only `type: "function"` is supported.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct Tool {
+    /// Discriminator; must be `function`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Function name, description and JSON-schema parameters.
+    pub function: FunctionDefinition,
+}
+
+impl Tool {
+    /// Creates a function tool.
+    #[must_use]
+    pub fn function(function: FunctionDefinition) -> Self {
+        Self {
+            kind: "function".to_owned(),
+            function,
+        }
+    }
+}
+
+/// An OpenAI function definition carried by a [`Tool`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct FunctionDefinition {
+    /// Function name used by `tool_choice` and emitted in tool calls.
+    pub name: String,
+    /// Optional human-readable description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// JSON-schema parameters; only flat object properties are used for generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
+}
+
+impl FunctionDefinition {
+    /// Creates a function definition with no description or parameters.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: None,
+            parameters: None,
+        }
+    }
+}
+
+/// OpenAI `tool_choice`: a mode string, a named function object, or an unsupported string.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    /// `none`, `auto` or `required`.
+    Mode(ToolChoiceMode),
+    /// Force the named function.
+    Function(NamedToolChoice),
+    /// Any other string, preserved so the service can return a typed 400.
+    Unsupported(String),
+}
+
+/// String forms of OpenAI's `tool_choice`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolChoiceMode {
+    /// Never request a tool call.
+    None,
+    /// Let the model decide; the reference backend declines.
+    Auto,
+    /// Request a tool call.
+    Required,
+}
+
+/// Object form of OpenAI's `tool_choice`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct NamedToolChoice {
+    /// Discriminator; must be `function`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Function to call.
+    pub function: FunctionReference,
+}
+
+/// Function reference inside [`NamedToolChoice`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct FunctionReference {
+    /// Name of a function declared in the request's `tools`.
+    pub name: String,
+}
+
+/// A complete tool call emitted in an assistant message.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ToolCall {
+    /// Stable call identifier.
+    pub id: String,
+    /// Discriminator; always `function` for generated calls.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Function name and JSON-encoded arguments string.
+    pub function: ToolCallFunction,
+}
+
+/// Function payload of a [`ToolCall`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ToolCallFunction {
+    /// Function name.
+    pub name: String,
+    /// Arguments encoded as a JSON object string.
+    pub arguments: String,
+}
+
+/// One incremental tool-call delta in an SSE chunk.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ToolCallDelta {
+    /// Zero-based tool-call index, matching OpenAI's streaming shape.
+    pub index: u32,
+    /// Call id, present on the first delta of a tool call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Discriminator, present on the first delta of a tool call.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Function fragment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<ToolCallFunctionDelta>,
+}
+
+/// Function fragment inside a [`ToolCallDelta`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ToolCallFunctionDelta {
+    /// Function name, present on the first delta of a tool call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Fragment of the JSON-encoded arguments string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
 }
 
 /// Subset of the OpenAI chat-completion request understood by the reference backend.
@@ -59,6 +210,12 @@ pub struct ChatCompletionRequest {
     /// Stop strings, either one string or a list of strings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop: Option<StringOrList>,
+    /// Optional tool definitions; requests without tools keep the legacy response shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+    /// How the service may use the declared tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 /// One choice in a non-streaming chat response.
@@ -68,8 +225,11 @@ pub struct ChatChoice {
     pub index: u32,
     /// Generated message; the role is always `assistant`.
     pub message: ChatMessage,
-    /// `stop` or `length`, matching OpenAI's finish-reason vocabulary.
+    /// `stop`, `length` or `tool_calls`, matching OpenAI's finish-reason vocabulary.
     pub finish_reason: Option<String>,
+    /// Tool calls emitted with this choice, absent for ordinary text responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 /// Non-streaming `POST /v1/chat/completions` response.
@@ -119,6 +279,9 @@ pub struct ChatDelta {
     /// Generated text fragment; absent on the empty role and finish chunks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Incremental tool-call fragments; absent on ordinary text streams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallDelta>>,
 }
 
 impl ChatDelta {
@@ -128,6 +291,17 @@ impl ChatDelta {
         Self {
             role: None,
             content: Some(content.into()),
+            tool_calls: None,
+        }
+    }
+
+    /// Creates a tool-call delta.
+    #[must_use]
+    pub fn tool_calls(calls: Vec<ToolCallDelta>) -> Self {
+        Self {
+            role: None,
+            content: None,
+            tool_calls: Some(calls),
         }
     }
 }
@@ -198,6 +372,55 @@ mod tests {
     }
 
     #[test]
+    fn tool_fields_deserialise_and_legacy_requests_omit_them() {
+        let request: ChatCompletionRequest = serde_json::from_str(
+            r#"{
+                "model":"m",
+                "messages":[{
+                    "role":"assistant",
+                    "content":null,
+                    "tool_calls":[{"id":"c1","type":"function","function":{"name":"calc","arguments":"{}"}}],
+                    "tool_call_id":"c0",
+                    "unknown_message_field":true
+                }],
+                "tools":[{"type":"function","function":{"name":"calc","description":null,"parameters":{"type":"object","properties":{}}},"unknown_tool_field":1}],
+                "tool_choice":{"type":"function","function":{"name":"calc"},"unknown_choice_field":2},
+                "parallel_tool_calls":false
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(request.messages[0].content, "");
+        assert_eq!(request.messages[0].tool_call_id.as_deref(), Some("c0"));
+        let call = &request.messages[0].tool_calls.as_ref().unwrap()[0];
+        assert_eq!(call.function.name, "calc");
+        assert_eq!(call.function.arguments, "{}");
+        assert_eq!(request.tools.as_ref().unwrap()[0].function.name, "calc");
+        assert!(matches!(request.tool_choice, Some(ToolChoice::Function(_))));
+
+        assert_eq!(
+            serde_json::from_str::<ToolChoice>(r#""required""#).unwrap(),
+            ToolChoice::Mode(ToolChoiceMode::Required)
+        );
+        assert_eq!(
+            serde_json::from_str::<ToolChoice>(r#""sometimes""#).unwrap(),
+            ToolChoice::Unsupported("sometimes".to_owned())
+        );
+
+        let minimal: ChatCompletionRequest =
+            serde_json::from_str(r#"{"model":"m","messages":[{"role":"user","content":"hi"}]}"#)
+                .unwrap();
+        let json = serde_json::to_value(minimal).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("tools"));
+        assert!(!json.as_object().unwrap().contains_key("tool_choice"));
+        assert!(
+            !json["messages"][0]
+                .as_object()
+                .unwrap()
+                .contains_key("tool_calls")
+        );
+    }
+
+    #[test]
     fn response_shapes_round_trip() {
         let response = ChatCompletionResponse::new(
             "chatcmpl-1".to_owned(),
@@ -207,12 +430,19 @@ mod tests {
                 index: 0,
                 message: ChatMessage::new("assistant", "answer"),
                 finish_reason: Some("stop".to_owned()),
+                tool_calls: None,
             }],
             Usage::new(3, 1),
         );
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["object"], "chat.completion");
         assert_eq!(json["usage"]["total_tokens"], 4);
+        assert!(
+            !json["choices"][0]
+                .as_object()
+                .unwrap()
+                .contains_key("tool_calls")
+        );
         assert_eq!(
             serde_json::from_value::<ChatCompletionResponse>(json).unwrap(),
             response

@@ -1,0 +1,13 @@
+[package]
+name = "quarrel-backend-cpu"
+description = "Batch-aware CPU backend built on runtime-dispatched numeric kernels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+quarrel-engine.workspace = true
+quarrel-simd.workspace = true

@@ -1814,6 +1814,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quarrel-backend-cpu"
+version = "0.1.0"
+dependencies = [
+ "quarrel-engine",
+ "quarrel-simd",
+]
+
+[[package]]
 name = "quarrel-core"
 version = "0.1.0"
 dependencies = [
@@ -1869,6 +1877,7 @@ name = "quarrel-gguf"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "clap",
  "criterion",
  "half",
  "insta",

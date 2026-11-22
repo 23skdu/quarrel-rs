@@ -5,8 +5,8 @@
 > OpenAI/OpenAPI HTTP plane, embedded WebUI, Ollama shims, Python Flight SDK with generate/embed,
 > paged KV/batching/radix prefix engine primitives, all quant matvec kernels, Criterion/iai-callgrind
 > baselines, metric contract and container/Helm/deployment variants are live on the deterministic
-> reference backend. Oracle parity, hardware backends, function calling and the remaining integration
-> gates stay open until their acceptance criteria pass.
+> reference backend. Oracle parity, hardware backends, remaining architecture/LoRA work and the
+> integration gates stay open until their acceptance criteria pass.
 > **Goal:** a clean-room Rust rewrite of [`23skdu/longbow-quarrel`](https://github.com/23skdu/longbow-quarrel)
 > that preserves its memory-efficient inference semantics while adding two first-class client planes:
 > an **Arrow Flight (gRPC) zero-copy vector plane for Agents**, and an **OpenAI-compatible HTTP API
@@ -303,7 +303,7 @@ Mistral); fuzz targets run for 60 s without a crash.
 - [x] **P2-02** Memory-map weights with `memmap2`; expose typed tensor views without copying.
 - [x] **P2-03** Implement zero-copy matvec for FP32, FP16, BF16, Q8_0, Q6_K, Q5_K, Q4_K, Q4_0,
       Q3_K, Q2_K; prove no intermediate `Vec<f32>` with allocator counters.
-- [ ] **P2-04** Port GGUF writer and `quarrel-quantize` CLI (`q4_k`, `q6_k`, `q8_0`, `f16`, `f32`).
+- [x] **P2-04** Port GGUF writer and `quarrel-quantize` CLI (`q4_k`, `q6_k`, `q8_0`, `f16`, `f32`).
 - [x] **P2-05** Port on-demand token embedding lookup (never materialise the vocabulary table).
 - [ ] **P2-06** Validate TurboQuant KV codec (PolarQuant + QJL) against the Go oracle; 8× compression.
 - [x] **P2-07** Universal model resolver across `~/.cache/llmfit`, llama.cpp, Hugging Face, Ollama
@@ -314,12 +314,12 @@ green for every supported quant; quantizer output reloads identically.
 
 ### Phase 3 — Engine core
 
-- [ ] **P3-01** Backend trait: `fn forward(&self, batch: &Batch, kv: &mut KvCache) -> Result<Logits>`;
+- [x] **P3-01** Backend trait: `fn forward(&self, batch: &Batch, kv: &mut KvCache) -> Result<Logits>`;
       CPU implementation behind `quarrel-backend-cpu`.
 - [x] **P3-02** Continuous batching with iteration-level preemption and bounded queue depth.
 - [x] **P3-03** Paged KV cache with block tables, per-sequence isolation, rollback and prefix sharing.
 - [x] **P3-04** Radix-tree prompt prefix cache with LRU eviction and zero-copy prefix reuse.
-- [ ] **P3-05** Sampler: temperature, top-K, top-P, repetition penalty, grammar-constrained PDA.
+- [x] **P3-05** Sampler: temperature, top-K, top-P, repetition penalty, grammar-constrained PDA.
 - [ ] **P3-06** Dynamic architecture routing for llama/qwen2/qwen35/mistral/gemma4/phi3/smollm2/granite,
       including Qwen 3.5 hybrid SSM + full-attention layers.
 - [x] **P3-07** Jinja2-subset chat template renderer (`{% for %}`, `{% if %}`, `{% set %}`, `{{ var }}`)
@@ -349,7 +349,7 @@ schemas in `api/flight-schema.md`; allocator assertions show zero payload-copy a
 
 - [x] **P5-01** Move skeleton DTOs into `quarrel-api`; full `/v1/models`, chat, completions, embeddings.
 - [x] **P5-02** SSE streaming with `chat.completion.chunk`, `[DONE]`, heartbeats and cancellation.
-- [ ] **P5-03** Function/tool calling and grammar-constrained decoding wired to P3-05.
+- [x] **P5-03** Function/tool calling and grammar-constrained decoding wired to P3-05.
 - [x] **P5-04** Generate `openapi.json` from handlers with utoipa; keep `/docs` Swagger UI; drift test.
 - [x] **P5-05** Embedded WebUI served from the binary (`rust-embed`), replacing the second Go binary.
 - [x] **P5-06** Ollama-compatible `/api/generate` and `/api/chat` shims.
@@ -391,7 +391,7 @@ after one generated request; `helm template` renders valid Kubernetes YAML with 
 
 - [ ] **P8-01** `make accuracy-gate`, `make oracle-gate`, `make fuzz-coverage` (from Go roadmap) ported.
 - [ ] **P8-02** `cargo mutants` on `quarrel-core`, `quarrel-simd` and the sampler: no surviving mutants.
-- [ ] **P8-03** Allocation gate: zero allocations in decode and Flight payload paths after warm-up.
+- [x] **P8-03** Allocation gate: zero allocations in decode and Flight payload paths after warm-up.
 - [x] **P8-04** Leak gate: 16 load/search/close cycles with < 5 MB heap growth.
 - [ ] **P8-05** CI matrix: stable + MSRV, linux x86_64, linux aarch64, macOS arm64, CUDA job.
 - [x] **P8-06** Pre-commit hook enforced in CI by running `make precommit`.
