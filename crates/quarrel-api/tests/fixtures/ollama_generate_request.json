@@ -1,0 +1,18 @@
+{
+  "model": "reference-tiny",
+  "prompt": "Once upon a time",
+  "system": "Answer briefly.",
+  "suffix": "",
+  "stream": false,
+  "images": [],
+  "keep_alive": "5m",
+  "options": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "top_k": 8,
+    "seed": 42,
+    "num_predict": 4,
+    "stop": ["END"],
+    "repeat_penalty": 1.0
+  }
+}

@@ -1,10 +1,11 @@
 # quarrel-rs — Technical Roadmap
 
 > **Status:** Phase 0 is implemented; the Phase 1–4 library crates are complete with unit and
-> property tests. Fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) pass 60 s runs, and
-> the OpenAI/OpenAPI HTTP plane is live on the deterministic reference backend. Oracle parity,
-> advanced quant formats, hardware backends and the remaining integration gates stay open until
-> their acceptance criteria pass.
+> property tests. Fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) pass 60 s runs. The
+> OpenAI/OpenAPI HTTP plane, embedded WebUI, Ollama shims, Flight streaming/pooling, metric contract
+> and container/Helm/deployment variants are live on the deterministic reference backend. Oracle
+> parity, advanced quant formats, hardware backends and the remaining integration gates stay open
+> until their acceptance criteria pass.
 > **Goal:** a clean-room Rust rewrite of [`23skdu/longbow-quarrel`](https://github.com/23skdu/longbow-quarrel)
 > that preserves its memory-efficient inference semantics while adding two first-class client planes:
 > an **Arrow Flight (gRPC) zero-copy vector plane for Agents**, and an **OpenAI-compatible HTTP API
@@ -333,7 +334,7 @@ context holds constant VRAM; no data races under `cargo test --release` + `loom`
 - [x] **P4-01** `quarrel-flight` crate with schemas from §2.2 as Rust constants + generated IPC fixtures.
 - [x] **P4-02** tonic Flight server: `DoPut`, `DoGet`, `DoAction`, `ListFlights`, `GetFlightInfo`.
 - [x] **P4-03** Zero-copy request adapter: Arrow `RecordBatch` → engine requests with no JSON hop.
-- [ ] **P4-04** Zero-copy response adapter: pre-sized builders, pooled buffers, `RecordBatchStream`.
+- [x] **P4-04** Zero-copy response adapter: pre-sized builders, pooled buffers, `RecordBatchStream`.
 - [x] **P4-05** KV block transfer path with dtype metadata and endianness assertions.
 - [x] **P4-06** Schema-compatibility and drift tests; IPC golden files checked in.
 - [ ] **P4-07** Python client in `pythonsdk/` using `pyarrow.flight` with a notebook-style example.
@@ -348,8 +349,8 @@ schemas in `api/flight-schema.md`; allocator assertions show zero payload-copy a
 - [x] **P5-02** SSE streaming with `chat.completion.chunk`, `[DONE]`, heartbeats and cancellation.
 - [ ] **P5-03** Function/tool calling and grammar-constrained decoding wired to P3-05.
 - [x] **P5-04** Generate `openapi.json` from handlers with utoipa; keep `/docs` Swagger UI; drift test.
-- [ ] **P5-05** Embedded WebUI served from the binary (`rust-embed`), replacing the second Go binary.
-- [ ] **P5-06** Ollama-compatible `/api/generate` and `/api/chat` shims.
+- [x] **P5-05** Embedded WebUI served from the binary (`rust-embed`), replacing the second Go binary.
+- [x] **P5-06** Ollama-compatible `/api/generate` and `/api/chat` shims.
 - [x] **P5-07** Auth (API key/bearer), CORS, request-size limits and per-key rate limiting.
 - [x] **P5-08** Contract tests replaying recorded OpenAI SDK request/response pairs.
 
@@ -371,13 +372,13 @@ budget; unsafe code confined to P6-04 and FFI shims.
 
 ### Phase 7 — Operations and observability
 
-- [ ] **P7-01** Wire all §7 metrics into the code; add metric-name unit tests to prevent drift with
+- [x] **P7-01** Wire all §7 metrics into the code; add metric-name unit tests to prevent drift with
       `deploy/prometheus/alerts/quarrel.rules.yml` and the Grafana dashboard.
 - [ ] **P7-02** OTLP trace export behind the `otel` feature; propagators for HTTP and gRPC.
-- [ ] **P7-03** Dockerfile variants: CPU (default), CUDA (`nvidia/cuda` base), distroless runtime option.
-- [ ] **P7-04** Helm values for model PVC, GPU resources, probes, NetworkPolicy, ServiceMonitor and
+- [x] **P7-03** Dockerfile variants: CPU (default), CUDA (`nvidia/cuda` base), distroless runtime option.
+- [x] **P7-04** Helm values for model PVC, GPU resources, probes, NetworkPolicy, ServiceMonitor and
       PrometheusRule; add `helm unittest` golden templates.
-- [ ] **P7-05** Dashboard panels for TTFT, decode throughput, KV saturation, Flight traffic, offload
+- [x] **P7-05** Dashboard panels for TTFT, decode throughput, KV saturation, Flight traffic, offload
       and memory; document every panel in `docs/metrics.md`.
 - [ ] **P7-06** SBOM and reproducible image builds (`SOURCE_DATE_EPOCH`, cosign signing in CI).
 

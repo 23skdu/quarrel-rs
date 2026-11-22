@@ -63,6 +63,17 @@ pub enum FlightError {
         /// Byte order of the host interpreting the payload.
         actual: &'static str,
     },
+
+    /// No pooled response builder was available and the pool is at capacity.
+    #[error("response builder pool exhausted (capacity {capacity})")]
+    PoolExhausted {
+        /// Maximum number of builders the pool may lend at once.
+        capacity: usize,
+    },
+
+    /// A builder was released to a pool that did not issue it, or was already returned.
+    #[error("invalid response builder release: {0}")]
+    InvalidBuilderRelease(String),
 }
 
 impl FlightError {
@@ -76,10 +87,12 @@ impl FlightError {
             Self::InvalidArgument(_)
             | Self::ExpectedSingleRow(_)
             | Self::MissingField(_)
-            | Self::UnsupportedKvDtype(_) => tonic::Status::invalid_argument(message),
+            | Self::UnsupportedKvDtype(_)
+            | Self::InvalidBuilderRelease(_) => tonic::Status::invalid_argument(message),
             Self::SchemaMismatch { .. } | Self::EndiannessMismatch { .. } => {
                 tonic::Status::failed_precondition(message)
             }
+            Self::PoolExhausted { .. } => tonic::Status::resource_exhausted(message),
             _ => tonic::Status::internal(message),
         }
     }

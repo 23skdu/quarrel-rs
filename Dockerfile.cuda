@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1.7
+
+# CUDA-enabled base image. This is the deployment target prepared for the Phase 6 GPU backend;
+# the current binary still uses the deterministic CPU reference backend. Do not claim GPU parity
+# until the P6 parity gates land.
+
+ARG RUST_VERSION=1.100.0
+ARG CUDA_VERSION=12.8.1
+
+# ---- builder -----------------------------------------------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
+
+ARG RUST_VERSION
+ARG SOURCE_DATE_EPOCH=0
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} \
+    CARGO_INCREMENTAL=0 \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     build-essential cmake pkg-config perl curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+  | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}"
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+
+RUN cargo build --release --locked -p quarrel-server
+
+# ---- runtime -----------------------------------------------------------------
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04 AS runtime
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE_DATE_EPOCH=0
+
+LABEL org.opencontainers.image.title="quarrel-rs" \
+      org.opencontainers.image.description="Arrow-based inference control plane (CUDA image, CPU reference backend)" \
+      org.opencontainers.image.source="https://github.com/23skdu/quarrel-rs" \
+      org.opencontainers.image.licenses="Unlicense" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${SOURCE_DATE_EPOCH}"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system --gid 1000 quarrel \
+  && useradd --system --uid 1000 --gid quarrel --no-create-home --home-dir /app quarrel \
+  && mkdir -p /models /app \
+  && chown -R quarrel:quarrel /models /app
+
+COPY --from=builder /app/target/release/quarrel-server /usr/local/bin/quarrel
+
+USER quarrel:quarrel
+ENV QUARREL_LISTEN=0.0.0.0:8080 \
+    QUARREL_MODELS_DIR=/models \
+    RUST_LOG=info \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null || exit 1
+
+ENTRYPOINT ["quarrel"]

@@ -10,6 +10,7 @@ pub mod completion;
 pub mod embedding;
 pub mod error;
 pub mod model;
+pub mod ollama;
 pub mod system;
 
 pub use chat::{
@@ -24,4 +25,8 @@ pub use embedding::{
 };
 pub use error::{ErrorDetail, ErrorEnvelope};
 pub use model::{Model, ModelList};
+pub use ollama::{
+    OllamaChatMessage, OllamaChatRequest, OllamaChatResponse, OllamaGenerateRequest,
+    OllamaGenerateResponse, OllamaOptions,
+};
 pub use system::{HealthResponse, ReadyResponse};

@@ -1,0 +1,40 @@
+# Monitoring-enabled render:
+#   helm template quarrel helm/quarrel -f helm/quarrel/values-monitoring.yaml
+# The Prometheus Operator must be installed for the CRDs to be accepted by the
+# cluster; this file only changes what the chart renders.
+
+replicaCount: 2
+
+persistence:
+  size: 20Gi
+
+startupProbe:
+  enabled: true
+  failureThreshold: 30
+  periodSeconds: 5
+
+readinessProbe:
+  periodSeconds: 5
+
+# Allow clients in this namespace and scrapes from the monitoring namespace;
+# keep egress permissive (model downloads and DNS need it).
+networkPolicy:
+  enabled: true
+  ingressPeers:
+    - podSelector: {}
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  egressRules: []
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 10s
+    scrapeTimeout: 5s
+    labels:
+      release: prometheus
+  prometheusRule:
+    enabled: true
+    labels:
+      release: prometheus

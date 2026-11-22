@@ -19,4 +19,7 @@ spec:
     - port: http
       path: /metrics
       interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      {{- with .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
 {{- end }}

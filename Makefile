@@ -15,6 +15,13 @@ DOCKER ?= docker
 COMPOSE ?= $(DOCKER) compose
 JQ ?= jq
 YQ ?= yq
+IMAGE ?= quarrel-rs:local
+CUDA_VERSION ?= 12.8.1
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf dev)
+REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || printf unknown)
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || printf 0)
+DOCKER_BUILD_ARGS ?= --build-arg VERSION=$(VERSION) --build-arg REVISION=$(REVISION) \
+	--build-arg SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
 
 BREW_TOOLS := cargo-nextest cargo-deny cargo-audit bacon cargo-llvm-cov cargo-edit \
 	cargo-mutants cargo-bloat cargo-outdated taplo yq jq shellcheck helm
@@ -32,7 +39,8 @@ HOOKS_DIR := $(shell git rev-parse --git-path hooks 2>/dev/null || printf '.git/
 	coverage coverage-floors bench bench-quality bench-performance bench-regression \
 	fuzz fuzz-fmt fuzz-fmt-check fuzz-smoke fuzz-coverage miri mutants outdated doc bloat openapi \
 	openapi-check metrics-check \
-	docker-build docker-up docker-down docker-logs \
+	docker-build docker-build-cpu docker-build-cuda docker-build-distroless docker-build-all \
+	container-check docker-up docker-down docker-logs \
 	helm-lint helm-template links ci clean distclean
 
 ## Display this help message
@@ -250,9 +258,31 @@ metrics-check:
 	@grep -q 'quarrel_requests_total' deploy/prometheus/alerts/quarrel.rules.yml
 	@echo "metric names agree across code, alerts and dashboard"
 
-## Build the local container image
-docker-build:
-	$(DOCKER) build -t quarrel-rs:local .
+## Build the CPU container image (default)
+docker-build: docker-build-cpu
+
+## Build the CPU container image explicitly
+docker-build-cpu:
+	$(DOCKER) build $(DOCKER_BUILD_ARGS) -t $(IMAGE) -f Dockerfile .
+
+## Build the CUDA-base container image (GPU kernels land in Phase 6)
+docker-build-cuda:
+	$(DOCKER) build $(DOCKER_BUILD_ARGS) --build-arg CUDA_VERSION=$(CUDA_VERSION) \
+		-t $(IMAGE)-cuda -f Dockerfile.cuda .
+
+## Build the distroless container image
+docker-build-distroless:
+	$(DOCKER) build $(DOCKER_BUILD_ARGS) -t $(IMAGE)-distroless -f Dockerfile.distroless .
+
+## Build all three container variants
+docker-build-all: docker-build-cpu docker-build-cuda docker-build-distroless
+
+## Validate all container definitions without building them
+container-check:
+	@for file in Dockerfile Dockerfile.cuda Dockerfile.distroless; do \
+		echo "==> checking $$file"; \
+		$(DOCKER) build --check $(DOCKER_BUILD_ARGS) -f $$file .; \
+	done
 
 ## Start quarrel-rs, Prometheus and Grafana
 docker-up:
@@ -284,7 +314,7 @@ links:
 	@echo "grafana:    http://localhost:3000"
 
 ## Full local gate sequence used by CI
-ci: fmt-check fuzz-fmt-check lint test security openapi-check metrics-check helm-lint
+ci: fmt-check fuzz-fmt-check lint test security openapi-check metrics-check helm-lint container-check
 	$(COMPOSE) config --quiet
 
 ## Remove build artefacts and generated caches

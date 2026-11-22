@@ -1,3 +1,5 @@
+# Default values for the quarrel chart.
+
 replicaCount: 1
 
 image:
@@ -17,6 +19,7 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
+# Pod-level security context (applies to every container in the pod).
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -25,6 +28,7 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# Container-level security context for the quarrel container.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -41,6 +45,8 @@ config:
   # When set, rendered into a Secret and required for every /v1/* request.
   apiKey: ""
 
+# GGUF model storage. Either let the chart create a PVC or point existingClaim
+# at one that is already populated; mountPath is passed to --models-dir.
 persistence:
   enabled: true
   # Set existingClaim to reuse a PVC that already holds your GGUF models.
@@ -49,6 +55,19 @@ persistence:
   size: 10Gi
   storageClass: ""
   mountPath: /models
+  readOnly: true
+
+# Optional GPU scheduling. When enabled the device resource below is added to
+# both container requests and limits; extraRequests/extraLimits allow for
+# vendor-specific resources such as nvidia.com/gpumem.
+gpu:
+  enabled: false
+  resourceName: nvidia.com/gpu
+  count: 1
+  extraRequests: {}
+  extraLimits: {}
+  # Optional RuntimeClass selecting a GPU-enabled runtime, e.g. "nvidia".
+  runtimeClassName: ""
 
 resources:
   requests:
@@ -58,7 +77,10 @@ resources:
     cpu: "2"
     memory: 1Gi
 
+# Each probe accepts arbitrary Kubernetes probe fields. Set enabled: false to
+# omit the probe entirely (useful for custom or externally managed probes).
 livenessProbe:
+  enabled: true
   httpGet:
     path: /healthz
     port: http
@@ -68,6 +90,7 @@ livenessProbe:
   failureThreshold: 3
 
 readinessProbe:
+  enabled: true
   httpGet:
     path: /readyz
     port: http
@@ -75,6 +98,14 @@ readinessProbe:
   periodSeconds: 10
   timeoutSeconds: 3
   failureThreshold: 3
+
+startupProbe:
+  enabled: false
+  httpGet:
+    path: /healthz
+    port: http
+  failureThreshold: 30
+  periodSeconds: 10
 
 autoscaling:
   enabled: false
@@ -94,13 +125,27 @@ ingress:
           pathType: Prefix
   tls: []
 
+# Restrict traffic to the pod. The default rules allow the HTTP port from any
+# peer and unrestricted egress; supply peers/rules to tighten them.
+networkPolicy:
+  enabled: false
+  labels: {}
+  # List of NetworkPolicyPeer objects. Empty means "from any peer".
+  ingressPeers: []
+  # List of NetworkPolicyEgressRule objects. Empty means "to any destination".
+  egressRules: []
+
 monitoring:
   serviceMonitor:
     enabled: false
     interval: 15s
+    # Optional scrape timeout, e.g. 10s; empty uses the Prometheus default.
+    scrapeTimeout: ""
+    # Extra labels, typically the Prometheus Operator selector label.
     labels: {}
   prometheusRule:
     enabled: false
+    # Extra labels, typically the Prometheus Operator selector label.
     labels: {}
 
 nodeSelector: {}

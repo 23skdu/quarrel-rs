@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use quarrel_api::{
     ApiError, ChatCompletionRequest, CompletionRequest, EmbeddingRequest, ErrorDetail,
-    ErrorEnvelope, InferenceService, ModelList,
+    ErrorEnvelope, InferenceService, ModelList, OllamaChatRequest, OllamaGenerateRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -24,6 +24,10 @@ const EMBEDDING_BASE64_REQUEST: &str = include_str!("fixtures/embedding_base64_r
 const EMBEDDING_BASE64_RESPONSE: &str = include_str!("fixtures/embedding_base64_response.json");
 const MODELS_RESPONSE: &str = include_str!("fixtures/models_response.json");
 const ERROR_RESPONSE: &str = include_str!("fixtures/error_response.json");
+const OLLAMA_GENERATE_REQUEST: &str = include_str!("fixtures/ollama_generate_request.json");
+const OLLAMA_GENERATE_RESPONSE: &str = include_str!("fixtures/ollama_generate_response.json");
+const OLLAMA_CHAT_REQUEST: &str = include_str!("fixtures/ollama_chat_request.json");
+const OLLAMA_CHAT_RESPONSE: &str = include_str!("fixtures/ollama_chat_response.json");
 
 fn service() -> InferenceService {
     InferenceService::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/models"))
@@ -110,6 +114,26 @@ fn embedding_contract_replays_in_both_encodings() {
 fn model_list_contract_replays() {
     assert_matches_fixture(&service().models().unwrap(), MODELS_RESPONSE);
     assert_matches_fixture(&ModelList::empty(), r#"{"object":"list","data":[]}"#);
+}
+
+#[test]
+fn ollama_shim_contracts_replay() {
+    let request: OllamaGenerateRequest = serde_json::from_str(OLLAMA_GENERATE_REQUEST).unwrap();
+    assert_eq!(request.model, "reference-tiny");
+    assert_eq!(request.prompt, "Once upon a time");
+    assert_eq!(request.options.as_ref().unwrap().num_predict, Some(4));
+    assert_matches_fixture(
+        &service().ollama_generate(&request).unwrap(),
+        OLLAMA_GENERATE_RESPONSE,
+    );
+
+    let request: OllamaChatRequest = serde_json::from_str(OLLAMA_CHAT_REQUEST).unwrap();
+    assert_eq!(request.messages.len(), 2);
+    assert_eq!(request.messages[1].content, "Hello!");
+    assert_matches_fixture(
+        &service().ollama_chat(&request).unwrap(),
+        OLLAMA_CHAT_RESPONSE,
+    );
 }
 
 #[test]

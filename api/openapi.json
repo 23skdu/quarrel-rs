@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "quarrel-rs API",
-    "description": "OpenAI-compatible inference API and operations endpoints. Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fixture (not Go parity); streaming responses emit chat.completion.chunk events.",
+    "description": "OpenAI-compatible inference API, Ollama-compatible shims and operations endpoints. Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fixture (not Go parity); OpenAI streaming emits chat.completion.chunk events and the Ollama shims emit newline-delimited JSON.",
     "contact": {
       "name": "quarrel-rs contributors"
     },
@@ -18,15 +18,159 @@
         "tags": [
           "system"
         ],
-        "summary": "Minimal landing page with links to the API contract and operational endpoints.",
+        "summary": "Self-contained WebUI with model discovery, chat (including SSE streaming) and embeddings.",
         "operationId": "root",
         "responses": {
           "200": {
-            "description": "Landing page",
+            "description": "Embedded WebUI",
             "content": {
               "text/plain": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "ollama"
+        ],
+        "summary": "Ollama-compatible chat, backed by the same reference backend as `/v1/chat/completions`.",
+        "description": "`stream: true` emits Ollama's newline-delimited JSON framing (`application/x-ndjson`).",
+        "operationId": "ollama_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OllamaChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ollama chat response, or newline-delimited JSON chunks when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OllamaChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generate": {
+      "post": {
+        "tags": [
+          "ollama"
+        ],
+        "summary": "Ollama-compatible text generation, backed by the same reference backend as `/v1/*`.",
+        "description": "`stream: true` emits Ollama's newline-delimited JSON framing (`application/x-ndjson`), reusing\nthe SSE producer for pacing. This is a compatibility shim, not a Go-parity model.",
+        "operationId": "ollama_generate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OllamaGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ollama generate response, or newline-delimited JSON chunks when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OllamaGenerateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -1029,6 +1173,287 @@
           }
         }
       },
+      "OllamaChatMessage": {
+        "type": "object",
+        "description": "One chat message in Ollama's shape.",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Message content."
+          },
+          "role": {
+            "type": "string",
+            "description": "Message role, for example `user` or `assistant`."
+          }
+        }
+      },
+      "OllamaChatRequest": {
+        "type": "object",
+        "description": "`POST /api/chat` request in Ollama's shape.",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OllamaChatMessage"
+            },
+            "description": "Conversation messages."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id to generate with; must appear in `GET /v1/models`."
+          },
+          "options": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OllamaOptions",
+                "description": "Sampling options."
+              }
+            ]
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Return newline-delimited JSON chunks when `true`; defaults to `false`."
+          }
+        }
+      },
+      "OllamaChatResponse": {
+        "type": "object",
+        "description": "Non-streaming `POST /api/chat` response and each streamed chunk.",
+        "required": [
+          "model",
+          "created_at",
+          "message",
+          "done"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339 UTC timestamp."
+          },
+          "done": {
+            "type": "boolean",
+            "description": "`true` on the final chunk of a stream."
+          },
+          "done_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ollama finish reason, present when `done` is `true`."
+          },
+          "eval_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Number of generated tokens, present on non-streaming responses.",
+            "minimum": 0
+          },
+          "message": {
+            "$ref": "#/components/schemas/OllamaChatMessage",
+            "description": "Generated message; the role is always `assistant`."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for generation."
+          },
+          "prompt_eval_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Number of prompt tokens, present on non-streaming responses.",
+            "minimum": 0
+          }
+        }
+      },
+      "OllamaGenerateRequest": {
+        "type": "object",
+        "description": "`POST /api/generate` request in Ollama's shape.",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Model id to generate with; must appear in `GET /v1/models`."
+          },
+          "options": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OllamaOptions",
+                "description": "Sampling options."
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Generation prompt."
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Return newline-delimited JSON chunks when `true`; defaults to `false`."
+          },
+          "suffix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ollama suffix field; accepted for client compatibility but not rendered by the fixture."
+          },
+          "system": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional system instruction prepended to the conversation."
+          }
+        }
+      },
+      "OllamaGenerateResponse": {
+        "type": "object",
+        "description": "Non-streaming `POST /api/generate` response.",
+        "required": [
+          "model",
+          "created_at",
+          "response",
+          "done"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "RFC 3339 UTC timestamp."
+          },
+          "done": {
+            "type": "boolean",
+            "description": "`true` on the final chunk of a stream."
+          },
+          "done_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ollama finish reason, present when `done` is `true`."
+          },
+          "eval_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Number of generated tokens, present on non-streaming responses.",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for generation."
+          },
+          "prompt_eval_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Number of prompt tokens, present on non-streaming responses.",
+            "minimum": 0
+          },
+          "response": {
+            "type": "string",
+            "description": "Generated text; empty on the final chunk of a stream."
+          }
+        }
+      },
+      "OllamaOptions": {
+        "type": "object",
+        "description": "Sampling options accepted inside an Ollama request's `options` object.",
+        "properties": {
+          "num_predict": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Ollama's name for the maximum number of generated tokens.",
+            "minimum": 0
+          },
+          "repeat_penalty": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Repetition penalty applied to already-generated tokens."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seed for deterministic sampling.",
+            "minimum": 0
+          },
+          "stop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StringOrList",
+                "description": "Stop strings, either one string or a list."
+              }
+            ]
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Softmax temperature; `0.0` selects greedy decoding."
+          },
+          "top_k": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Top-k truncation.",
+            "minimum": 0
+          },
+          "top_p": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Nucleus sampling mass."
+          }
+        }
+      },
       "ReadyResponse": {
         "type": "object",
         "description": "`GET /readyz` readiness response.",
@@ -1102,6 +1527,10 @@
     {
       "name": "openai",
       "description": "OpenAI-compatible inference endpoints backed by the reference backend"
+    },
+    {
+      "name": "ollama",
+      "description": "Ollama-compatible shims backed by the same reference backend; not Go parity"
     }
   ]
 }

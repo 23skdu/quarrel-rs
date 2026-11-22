@@ -4,11 +4,15 @@
 //! service described by `api/flight-schema.md`. All payloads stay as Arrow
 //! `RecordBatch`es until they reach an adapter.
 
+#![deny(missing_docs)]
+
 mod adapters;
 mod error;
 mod ipc;
+mod pool;
 mod schema;
 mod service;
+mod stream;
 
 pub use adapters::{
     DEFAULT_MODEL_ID, FINISH_REASON_LENGTH, GenerateRequestView, GenerateResponseBuilder,
@@ -22,6 +26,7 @@ pub use adapters::{
 };
 pub use error::FlightError;
 pub use ipc::{batch_to_ipc, ipc_to_batch};
+pub use pool::{PooledResponseBuilder, ResponseBatchPool};
 pub use schema::{
     DEFAULT_EMBEDDING_DIM, DEFAULT_KV_BLOCK_BYTES, canonical_fields_json, embed_request_schema,
     embed_response_schema, generate_request_schema, generate_response_schema, kv_blocks_schema,
@@ -30,6 +35,7 @@ pub use schema::{
 pub use service::{
     DEFAULT_QUEUE_DEPTH, GENERATE_PATH, HEALTH_ACTION, QuarrelFlightService, flight_server,
 };
+pub use stream::{RecordBatchStream, record_batch_stream, record_batch_stream_from_iter};
 
 /// Arrow `RecordBatch`, re-exported for convenience of Flight clients.
 pub use arrow::record_batch::RecordBatch;

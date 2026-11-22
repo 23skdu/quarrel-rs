@@ -7,6 +7,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::rejection::JsonRejection,
     extract::{Request, State},
     http::header::{AUTHORIZATION, CONTENT_TYPE},
@@ -17,7 +18,8 @@ use axum::{
 use quarrel_api::{
     ChatCompletionRequest, ChatCompletionResponse, ChatEventSse, ChatMessage, CompletionRequest,
     CompletionResponse, EmbeddingList, EmbeddingRequest, ErrorEnvelope, HealthResponse,
-    InferenceService, ModelList, RateLimiter, ReadyResponse,
+    InferenceService, ModelList, OllamaChatRequest, OllamaChatResponse, OllamaGenerateRequest,
+    OllamaGenerateResponse, RateLimiter, ReadyResponse, WEBUI_HTML,
 };
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::warn;
@@ -69,6 +71,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
         .route("/v1/embeddings", post(embeddings))
+        .route("/api/generate", post(ollama_generate))
+        .route("/api/chat", post(ollama_chat))
         .fallback(fallback)
         .layer(from_fn_with_state(state.clone(), observe_requests))
         .layer(TraceLayer::new_for_http())
@@ -96,9 +100,9 @@ async fn observe_requests(State(state): State<AppState>, request: Request, next:
     let endpoint = endpoint_label(&path);
     let started = std::time::Instant::now();
 
-    let response = if path.starts_with("/v1/") {
+    let response = if path.starts_with("/v1/") || is_ollama_inference_path(&path) {
         if !is_authorized(&request, state.config.api_key.as_deref()) {
-            warn!(%path, "rejected unauthenticated /v1 request");
+            warn!(%path, "rejected unauthenticated inference request");
             ApiError::Unauthorized.into_response()
         } else {
             let key = rate_limit_key(&request);
@@ -122,6 +126,11 @@ async fn observe_requests(State(state): State<AppState>, request: Request, next:
         .metrics
         .record_request(endpoint, &method, status, started.elapsed());
     response
+}
+
+/// Ollama shims carry inference traffic, so they share the `/v1/*` auth and rate-limit policy.
+fn is_ollama_inference_path(path: &str) -> bool {
+    matches!(path, "/api/generate" | "/api/chat")
 }
 
 fn is_authorized(request: &Request, expected: Option<&str>) -> bool {
@@ -164,6 +173,8 @@ fn endpoint_label(path: &str) -> &'static str {
         "/v1/chat/completions" => "v1_chat_completions",
         "/v1/completions" => "v1_completions",
         "/v1/embeddings" => "v1_embeddings",
+        "/api/generate" => "api_generate",
+        "/api/chat" => "api_chat",
         _ if path.starts_with("/docs") || path == "/openapi.json" => "docs",
         _ => "other",
     }
@@ -200,21 +211,15 @@ async fn docs() -> HtmlPage {
     )
 }
 
-/// Minimal landing page with links to the API contract and operational endpoints.
+/// Self-contained WebUI with model discovery, chat (including SSE streaming) and embeddings.
 #[utoipa::path(
     get,
     path = "/",
     tag = "system",
-    responses((status = 200, description = "Landing page", body = String))
+    responses((status = 200, description = "Embedded WebUI", body = String))
 )]
 async fn root() -> HtmlPage {
-    HtmlPage(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>quarrel-rs</title></head>
-<body><h1>quarrel-rs</h1><p>OpenAI-compatible API backed by the deterministic reference backend.</p>
-<ul><li><a href="/docs">OpenAPI UI</a></li><li><a href="/metrics">Prometheus metrics</a></li>
-<li><a href="/healthz">Health</a></li></ul></body></html>"#
-            .to_owned(),
-    )
+    HtmlPage(WEBUI_HTML.to_owned())
 }
 
 /// Newtype so the root handler can return HTML without another dependency.
@@ -381,6 +386,73 @@ async fn embeddings(
     Ok(Json(state.service.embedding(&request)?))
 }
 
+/// Ollama-compatible text generation, backed by the same reference backend as `/v1/*`.
+///
+/// `stream: true` emits Ollama's newline-delimited JSON framing (`application/x-ndjson`), reusing
+/// the SSE producer for pacing. This is a compatibility shim, not a Go-parity model.
+#[utoipa::path(
+    post,
+    path = "/api/generate",
+    tag = "ollama",
+    request_body = OllamaGenerateRequest,
+    responses(
+        (status = 200, description = "Ollama generate response, or newline-delimited JSON chunks when stream=true", body = OllamaGenerateResponse),
+        (status = 400, description = "Invalid request or unknown model", body = ErrorEnvelope),
+        (status = 401, description = "Missing or invalid API key", body = ErrorEnvelope),
+        (status = 413, description = "Request body too large", body = ErrorEnvelope),
+        (status = 429, description = "Rate limit exceeded", body = ErrorEnvelope)
+    )
+)]
+async fn ollama_generate(
+    State(state): State<AppState>,
+    payload: Result<Json<OllamaGenerateRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = payload.map_err(rejection_error)?;
+    if request.stream.unwrap_or(false) {
+        let stream = state.service.ollama_generate_stream(&request)?;
+        Ok((
+            [(CONTENT_TYPE, "application/x-ndjson")],
+            Body::from_stream(stream),
+        )
+            .into_response())
+    } else {
+        Ok(Json(state.service.ollama_generate(&request)?).into_response())
+    }
+}
+
+/// Ollama-compatible chat, backed by the same reference backend as `/v1/chat/completions`.
+///
+/// `stream: true` emits Ollama's newline-delimited JSON framing (`application/x-ndjson`).
+#[utoipa::path(
+    post,
+    path = "/api/chat",
+    tag = "ollama",
+    request_body = OllamaChatRequest,
+    responses(
+        (status = 200, description = "Ollama chat response, or newline-delimited JSON chunks when stream=true", body = OllamaChatResponse),
+        (status = 400, description = "Invalid request or unknown model", body = ErrorEnvelope),
+        (status = 401, description = "Missing or invalid API key", body = ErrorEnvelope),
+        (status = 413, description = "Request body too large", body = ErrorEnvelope),
+        (status = 429, description = "Rate limit exceeded", body = ErrorEnvelope)
+    )
+)]
+async fn ollama_chat(
+    State(state): State<AppState>,
+    payload: Result<Json<OllamaChatRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = payload.map_err(rejection_error)?;
+    if request.stream.unwrap_or(false) {
+        let stream = state.service.ollama_chat_stream(&request)?;
+        Ok((
+            [(CONTENT_TYPE, "application/x-ndjson")],
+            Body::from_stream(stream),
+        )
+            .into_response())
+    } else {
+        Ok(Json(state.service.ollama_chat(&request)?).into_response())
+    }
+}
+
 fn rejection_error(rejection: JsonRejection) -> ApiError {
     ApiError::BadRequest(rejection.to_string())
 }
@@ -389,6 +461,7 @@ fn rejection_error(rejection: JsonRejection) -> ApiError {
 mod tests {
     use super::{
         AppState, CONTENT_TYPE, MAX_BODY_BYTES, build_router, endpoint_label, is_authorized,
+        is_ollama_inference_path,
     };
     use crate::{config::Config, metrics::test_metrics};
     use axum::{
@@ -454,8 +527,12 @@ mod tests {
             endpoint_label("/v1/chat/completions"),
             "v1_chat_completions"
         );
+        assert_eq!(endpoint_label("/api/generate"), "api_generate");
+        assert_eq!(endpoint_label("/api/chat"), "api_chat");
         assert_eq!(endpoint_label("/docs/swagger-ui.js"), "docs");
         assert_eq!(endpoint_label("/unknown"), "other");
+        assert!(is_ollama_inference_path("/api/chat"));
+        assert!(!is_ollama_inference_path("/api/unknown"));
     }
 
     #[test]
@@ -474,6 +551,31 @@ mod tests {
             .unwrap();
         assert!(is_authorized(&request, Some("secret")));
         assert!(!is_authorized(&request, Some("other")));
+    }
+
+    #[tokio::test]
+    async fn root_serves_the_embedded_webui() {
+        let response = build_router(test_state(None))
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        for needle in [
+            "/v1/models",
+            "/v1/chat/completions",
+            "/v1/embeddings",
+            "/docs",
+            "/metrics",
+        ] {
+            assert!(html.contains(needle), "missing WebUI control: {needle}");
+        }
+        assert!(!html.contains("http://") && !html.contains("https://"));
     }
 
     #[tokio::test]
@@ -640,6 +742,153 @@ mod tests {
         let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["data"][0]["embedding"].as_str().unwrap().len() > 100);
+    }
+
+    fn ollama_generate_request(model: &str) -> serde_json::Value {
+        serde_json::json!({
+            "model": model,
+            "prompt": "Hello!",
+            "options": {"temperature": 0.7, "num_predict": 3, "seed": 42}
+        })
+    }
+
+    fn ollama_chat_request(model: &str) -> serde_json::Value {
+        serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "Hello!"}],
+            "options": {"temperature": 0.7, "num_predict": 3, "seed": 42}
+        })
+    }
+
+    async fn json_body(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), 256 * 1024).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ollama_generate_returns_ollama_shape() {
+        let response = post_json(
+            test_state(None),
+            "/api/generate",
+            ollama_generate_request("reference-tiny"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "reference-tiny");
+        assert_eq!(json["response"].as_str().unwrap().chars().count(), 3);
+        assert!(json["done"].as_bool().unwrap());
+        assert_eq!(json["done_reason"], "length");
+        assert!(json["created_at"].as_str().unwrap().ends_with('Z'));
+        assert_eq!(json["eval_count"], 3);
+        assert!(json.get("stats").is_none());
+    }
+
+    #[tokio::test]
+    async fn ollama_chat_returns_ollama_shape() {
+        let response = post_json(
+            test_state(None),
+            "/api/chat",
+            ollama_chat_request("reference-tiny"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["message"]["role"], "assistant");
+        assert!(json["done"].as_bool().unwrap());
+        assert_eq!(json["done_reason"], "length");
+        assert!(json["prompt_eval_count"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn ollama_unknown_models_and_empty_messages_are_400() {
+        for (uri, payload) in [
+            ("/api/generate", ollama_generate_request("missing")),
+            ("/api/chat", ollama_chat_request("missing")),
+        ] {
+            let response = post_json(test_state(None), uri, payload).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let envelope = error_envelope(response).await;
+            assert_eq!(envelope.error.code.as_deref(), Some("invalid_model"));
+            assert_eq!(envelope.error.param.as_deref(), Some("model"));
+        }
+
+        let response = post_json(
+            test_state(None),
+            "/api/chat",
+            serde_json::json!({"model": "reference-tiny", "messages": []}),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_envelope(response).await.error.code.as_deref(),
+            Some("invalid_request")
+        );
+    }
+
+    #[tokio::test]
+    async fn ollama_streams_newline_delimited_json() {
+        let mut state = test_state(None);
+        state.service = Arc::new(
+            InferenceService::new(fixture_models_dir())
+                .with_created_at(0)
+                .with_timing(Duration::from_millis(2), Duration::from_millis(1)),
+        );
+        for (uri, mut payload, expected_role) in [
+            (
+                "/api/generate",
+                ollama_generate_request("reference-tiny"),
+                None,
+            ),
+            (
+                "/api/chat",
+                ollama_chat_request("reference-tiny"),
+                Some("assistant"),
+            ),
+        ] {
+            payload["stream"] = serde_json::json!(true);
+            let response = post_json(state.clone(), uri, payload).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get(CONTENT_TYPE).unwrap(),
+                "application/x-ndjson"
+            );
+            let bytes = to_bytes(response.into_body(), 256 * 1024).await.unwrap();
+            let text = String::from_utf8(bytes.to_vec()).unwrap();
+            let chunks: Vec<serde_json::Value> = text
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            assert!(chunks.len() > 2, "{text}");
+            assert!(
+                chunks[..chunks.len() - 1]
+                    .iter()
+                    .all(|chunk| !chunk["done"].as_bool().unwrap())
+            );
+            assert!(chunks.last().unwrap()["done"].as_bool().unwrap());
+            if let Some(role) = expected_role {
+                assert_eq!(chunks[0]["message"]["role"], role);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn ollama_routes_share_v1_auth_policy() {
+        let response = post_json(
+            test_state(Some("secret".to_owned())),
+            "/api/generate",
+            ollama_generate_request("reference-tiny"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            error_envelope(response).await.error.code.as_deref(),
+            Some("invalid_api_key")
+        );
     }
 
     #[tokio::test]

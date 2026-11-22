@@ -15,7 +15,7 @@ methodology is in [performance](performance.md); the full strategy is in [the te
 | Pull request | every push/PR to `main` | `.github/workflows/ci.yml` (including `make precommit` and fuzz smoke) | Yes, on GitHub |
 | Security | every PR | `make security` (`cargo audit` + `cargo deny`) | Yes |
 | Coverage | every PR once floors are enabled | `make coverage-floors`, `make coverage` | Yes |
-| Contract | every PR | `make openapi-check`, `make metrics-check`, `make helm-lint` | Yes |
+| Contract | every PR | `make openapi-check`, `make metrics-check`, `make helm-lint`, `make container-check` | Yes |
 | Tooling | every PR | `make test-benchtool`, `python3 scripts/bench.py --profile quality --dry-run` | Yes |
 | Deep quality | nightly / release candidate | `make fuzz`, `make mutants`, `make miri`, `make bench-regression` | Yes before release |
 | Release | tag `v*` | SBOM, image signing, parity report | Yes before publish |
@@ -38,12 +38,13 @@ wrong, fix the hook.
 
 ## 3. Pull-request gates
 
-`.github/workflows/ci.yml` currently has four jobs:
+`.github/workflows/ci.yml` currently has five jobs:
 
 | Job | Steps | Rationale |
 |-----|-------|-----------|
 | `rust` | `make fmt-check`, `make fuzz-fmt-check`, `make precommit`, `make lint`, `make test`, `make security`, `make openapi-check`, `make metrics-check` | Source, tests, supply chain and API contract |
 | `charts` | `make helm-lint`, `make helm-template`, `docker compose config --quiet` | Deployment artefacts are valid YAML and render cleanly |
+| `containers` | `make container-check` | All three Dockerfile variants stay lint-clean without building them |
 | `tooling` | `make test-benchtool`, benchtool dry-run | The Go/Python test tooling itself is tested like any other code |
 | `fuzz` | `make fuzz-smoke` on nightly with `cargo-fuzz` | Parser/sampler/Arrow decoders survive malformed input |
 

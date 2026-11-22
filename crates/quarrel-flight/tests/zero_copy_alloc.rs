@@ -30,12 +30,12 @@ use std::{
 };
 
 use quarrel_core::{
-    BlockId, GenerateRequest, KvBlock, KvDtype, ModelId, RequestId, SamplingParams,
+    BlockId, GenerateRequest, KvBlock, KvDtype, ModelId, RequestId, SamplingParams, Token,
 };
 use quarrel_flight::{
-    GenerateResponseBuilder, batch_to_ipc, encode_generate_request, encode_kv_block,
-    generate_request_schema, ipc_to_batch, kv_block_payload, kv_blocks_schema_for,
-    request_token_ids,
+    GenerateResponseBuilder, ResponseBatchPool, batch_to_ipc, decode_generate_response,
+    encode_generate_request, encode_kv_block, generate_request_schema, ipc_to_batch,
+    kv_block_payload, kv_blocks_schema_for, request_token_ids,
 };
 
 const LARGE_ALLOCATION_BYTES: usize = 1024;
@@ -250,4 +250,51 @@ fn response_builder_scratch_stops_growing_after_warmup() {
         steady.bytes < 16_384,
         "one small response should not need large scratch allocations: {steady:?}"
     );
+}
+
+#[test]
+fn pooled_builder_reuse_keeps_scratch_capacity_stable() {
+    let _guard = lock_test();
+    let id = RequestId::new("pool-builder-alloc-test").unwrap();
+    let token = Token::new(15, 0.125);
+    let pool = ResponseBatchPool::new(1).unwrap();
+
+    let mut first = pool.acquire().unwrap();
+    for index in 0..64 {
+        first.encode(&id, index, &token, false).unwrap();
+    }
+    let warm_capacity = first.scratch_capacity().unwrap();
+    first.release().unwrap();
+
+    // Reacquisition should reuse the idle builder: no new payload-sized buffers
+    // and no fresh scratch capacity.
+    start_counting();
+    let mut reused = pool.acquire().unwrap();
+    let acquisition = stop_counting();
+    assert_eq!(reused.scratch_capacity().unwrap(), warm_capacity);
+    assert_eq!(
+        acquisition.large, 0,
+        "pool reuse must not allocate large buffers: {acquisition:?}"
+    );
+    assert!(
+        acquisition.allocations <= 16,
+        "pool reuse should only touch small bookkeeping: {acquisition:?}"
+    );
+
+    start_counting();
+    let batch = reused.encode(&id, 65, &token, true).unwrap();
+    let steady = stop_counting();
+    assert_eq!(reused.scratch_capacity().unwrap(), warm_capacity);
+    assert_eq!(decode_generate_response(&batch).unwrap().len(), 1);
+    assert!(
+        steady.allocations > 0,
+        "owned output buffers must still be allocated per response"
+    );
+    assert!(
+        steady.bytes < 16_384,
+        "reused scratch should not grow on encode: {steady:?}"
+    );
+    reused.release().unwrap();
+    assert_eq!(pool.in_use(), 0);
+    assert_eq!(pool.available(), 1);
 }

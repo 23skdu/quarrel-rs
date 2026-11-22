@@ -1,3 +1,18 @@
+{{- $resources := deepCopy (default (dict) .Values.resources) -}}
+{{- if .Values.gpu.enabled }}
+{{- $requests := deepCopy (default (dict) $resources.requests) -}}
+{{- $limits := deepCopy (default (dict) $resources.limits) -}}
+{{- $_ := set $requests .Values.gpu.resourceName .Values.gpu.count -}}
+{{- $_ := set $limits .Values.gpu.resourceName .Values.gpu.count -}}
+{{- range $key, $value := .Values.gpu.extraRequests }}
+{{- $_ := set $requests $key $value -}}
+{{- end }}
+{{- range $key, $value := .Values.gpu.extraLimits }}
+{{- $_ := set $limits $key $value -}}
+{{- end }}
+{{- $_ := set $resources "requests" $requests -}}
+{{- $_ := set $resources "limits" $limits -}}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,6 +45,9 @@ spec:
       serviceAccountName: {{ include "quarrel.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       containers:
         - name: quarrel
@@ -49,18 +67,26 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          {{- if .Values.livenessProbe.enabled }}
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- omit .Values.livenessProbe "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- omit .Values.readinessProbe "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            {{- omit .Values.startupProbe "enabled" | toYaml | nindent 12 }}
+          {{- end }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml $resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
             - name: models
               mountPath: {{ .Values.persistence.mountPath }}
-              readOnly: true
+              readOnly: {{ .Values.persistence.readOnly }}
       volumes:
         - name: models
           persistentVolumeClaim:

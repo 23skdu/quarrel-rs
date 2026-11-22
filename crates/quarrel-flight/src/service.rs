@@ -20,7 +20,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     FlightError, GenerateResponseBuilder, decode_generate_request_view, generate_response_schema,
-    schema_hash,
+    record_batch_stream, schema_hash,
 };
 
 /// Descriptor path used for generation requests.
@@ -259,7 +259,9 @@ impl FlightService for QuarrelFlightService {
             .map(|state| state.batches.clone())
             .ok_or_else(|| Status::not_found(format!("unknown request: {request_id}")))?;
 
-        let input = stream::iter(batches.into_iter().map(Ok));
+        // Move the batch vector into a RecordBatchStream; Arrow payload buffers
+        // stay shared and are not copied before the Flight encoder sees them.
+        let input = record_batch_stream(batches).map(Ok);
         let encoded = FlightDataEncoderBuilder::new()
             .with_schema(generate_response_schema())
             .build(input)

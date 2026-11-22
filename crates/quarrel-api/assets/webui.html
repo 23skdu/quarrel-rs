@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>quarrel-rs WebUI</title>
+<style>
+:root { color-scheme: dark; font-family: system-ui, sans-serif; }
+body { margin: 0 auto; max-width: 960px; padding: 1.5rem; line-height: 1.5; }
+h1 { margin-bottom: 0; }
+nav { display: flex; gap: 1rem; margin: 0.5rem 0 1.5rem; }
+a { color: #8ab4f8; }
+section { border: 1px solid #444; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+label { display: block; margin: 0.5rem 0 0.25rem; }
+input, select, textarea { width: 100%; box-sizing: border-box; background: #1b1b1b; color: inherit; border: 1px solid #555; border-radius: 4px; padding: 0.5rem; }
+textarea { min-height: 7rem; font-family: ui-monospace, monospace; }
+button { margin-top: 0.75rem; padding: 0.5rem 1rem; cursor: pointer; }
+.row { display: flex; align-items: center; gap: 0.5rem; }
+.row input { width: auto; }
+.row select { flex: 1; }
+pre { white-space: pre-wrap; word-break: break-word; background: #111; padding: 0.75rem; border-radius: 4px; min-height: 3rem; }
+small { color: #aaa; }
+</style>
+</head>
+<body>
+<h1>quarrel-rs</h1>
+<p>Self-contained WebUI for the deterministic reference backend. Not a Go-parity model.</p>
+<nav><a href="/docs">API docs</a><a href="/metrics">Metrics</a><a href="/healthz">Health</a></nav>
+
+<section>
+<h2>Connection</h2>
+<label for="api-key">API key (optional, sent as a Bearer token)</label>
+<input id="api-key" type="password" autocomplete="off" placeholder="Leave empty when auth is disabled">
+<label for="model">Model</label>
+<div class="row"><select id="model"></select><button id="refresh-models" type="button">Refresh models</button></div>
+<small id="connection-status">Models load when the page opens.</small>
+</section>
+
+<section>
+<h2>Chat completions</h2>
+<label for="chat-prompt">Prompt</label>
+<textarea id="chat-prompt">Hello from quarrel-rs!</textarea>
+<label class="row" for="chat-stream"><input id="chat-stream" type="checkbox"> Stream response (SSE)</label>
+<button id="run-chat" type="button">Run chat</button>
+<pre id="chat-output">Output appears here.</pre>
+</section>
+
+<section>
+<h2>Embeddings</h2>
+<label for="embedding-input">Input (one text per line)</label>
+<textarea id="embedding-input">hello
+world</textarea>
+<button id="run-embeddings" type="button">Run embeddings</button>
+<pre id="embedding-output">Output appears here.</pre>
+</section>
+
+<script>
+'use strict';
+const byId = (id) => document.getElementById(id);
+
+function headers() {
+  const key = byId('api-key').value.trim();
+  const result = { 'Content-Type': 'application/json' };
+  if (key) { result['Authorization'] = 'Bearer ' + key; }
+  return result;
+}
+
+async function errorText(response) {
+  const body = await response.text();
+  try {
+    const json = JSON.parse(body);
+    return json.error.message || body;
+  } catch (_) {
+    return body;
+  }
+}
+
+async function refreshModels() {
+  const status = byId('connection-status');
+  status.textContent = 'Loading models...';
+  try {
+    const response = await fetch('/v1/models', { headers: headers() });
+    if (!response.ok) { status.textContent = await errorText(response); return; }
+    const json = await response.json();
+    const select = byId('model');
+    select.innerHTML = '';
+    for (const model of json.data) {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = model.id;
+      select.appendChild(option);
+    }
+    status.textContent = json.data.length ? 'Ready.' : 'No models discovered; check the models directory.';
+  } catch (error) {
+    status.textContent = String(error);
+  }
+}
+
+async function runChat() {
+  const output = byId('chat-output');
+  output.textContent = 'Working...';
+  const streaming = byId('chat-stream').checked;
+  const body = {
+    model: byId('model').value,
+    messages: [{ role: 'user', content: byId('chat-prompt').value }],
+    stream: streaming,
+    temperature: 0.7,
+    max_tokens: 64,
+    seed: 42
+  };
+  try {
+    const response = await fetch('/v1/chat/completions', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!response.ok) { output.textContent = await errorText(response); return; }
+    if (!streaming) {
+      const json = await response.json();
+      output.textContent = json.choices[0].message.content;
+      return;
+    }
+    output.textContent = '';
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    while (true) {
+      const part = await reader.read();
+      if (part.done) { break; }
+      buffer += decoder.decode(part.value, { stream: true });
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data:')) { continue; }
+          const data = line.slice(5).trim();
+          if (data === '[DONE]') { continue; }
+          const chunk = JSON.parse(data);
+          text += chunk.choices[0].delta.content || '';
+          output.textContent = text;
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+  } catch (error) {
+    output.textContent = String(error);
+  }
+}
+
+async function runEmbeddings() {
+  const output = byId('embedding-output');
+  output.textContent = 'Working...';
+  const input = byId('embedding-input').value.split('\n').map((line) => line.trim()).filter(Boolean);
+  const body = { model: byId('model').value, input: input };
+  try {
+    const response = await fetch('/v1/embeddings', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!response.ok) { output.textContent = await errorText(response); return; }
+    const json = await response.json();
+    output.textContent = JSON.stringify(json, null, 2);
+  } catch (error) {
+    output.textContent = String(error);
+  }
+}
+
+byId('refresh-models').addEventListener('click', refreshModels);
+byId('run-chat').addEventListener('click', runChat);
+byId('run-embeddings').addEventListener('click', runEmbeddings);
+refreshModels();
+</script>
+</body>
+</html>

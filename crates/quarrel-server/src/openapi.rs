@@ -9,14 +9,16 @@ pub use quarrel_api::{
     ChatChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta,
     ChatMessage, ChatStreamChoice, CompletionChoice, CompletionRequest, CompletionResponse,
     EmbeddingList, EmbeddingObject, EmbeddingPayload, EmbeddingRequest, EmbeddingUsage,
-    EncodingFormat, ErrorDetail, ErrorEnvelope, HealthResponse, Model, ModelList, ReadyResponse,
-    StringOrList, Usage,
+    EncodingFormat, ErrorDetail, ErrorEnvelope, HealthResponse, Model, ModelList,
+    OllamaChatMessage, OllamaChatRequest, OllamaChatResponse, OllamaGenerateRequest,
+    OllamaGenerateResponse, OllamaOptions, ReadyResponse, StringOrList, Usage,
 };
 
 /// Description embedded in the generated document; also asserted by the drift test.
-pub const API_DESCRIPTION: &str = "OpenAI-compatible inference API and operations endpoints. \
-Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fixture \
-(not Go parity); streaming responses emit chat.completion.chunk events.";
+pub const API_DESCRIPTION: &str = "OpenAI-compatible inference API, Ollama-compatible shims and \
+operations endpoints. Generation and embeddings use quarrel-engine's deterministic \
+ReferenceBackend fixture (not Go parity); OpenAI streaming emits chat.completion.chunk events \
+and the Ollama shims emit newline-delimited JSON.";
 
 /// Generated OpenAPI document for the whole control plane.
 #[derive(Debug, OpenApi)]
@@ -34,6 +36,8 @@ Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fi
         crate::api::chat_completions,
         crate::api::completions,
         crate::api::embeddings,
+        crate::api::ollama_generate,
+        crate::api::ollama_chat,
         crate::api::metrics,
         crate::api::openapi_json,
         crate::api::docs,
@@ -63,10 +67,17 @@ Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fi
         EncodingFormat,
         HealthResponse,
         ReadyResponse,
+        OllamaOptions,
+        OllamaGenerateRequest,
+        OllamaGenerateResponse,
+        OllamaChatMessage,
+        OllamaChatRequest,
+        OllamaChatResponse,
     )),
     tags(
         (name = "system", description = "Liveness, readiness and metrics"),
         (name = "openai", description = "OpenAI-compatible inference endpoints backed by the reference backend"),
+        (name = "ollama", description = "Ollama-compatible shims backed by the same reference backend; not Go parity"),
     )
 )]
 pub struct ApiDoc;
@@ -97,6 +108,8 @@ mod tests {
             "/v1/chat/completions",
             "/v1/completions",
             "/v1/embeddings",
+            "/api/generate",
+            "/api/chat",
             "/metrics",
             "/openapi.json",
             "/docs",
@@ -118,6 +131,10 @@ mod tests {
             "CompletionResponse",
             "EmbeddingList",
             "ModelList",
+            "OllamaGenerateRequest",
+            "OllamaGenerateResponse",
+            "OllamaChatRequest",
+            "OllamaChatResponse",
             "ErrorEnvelope",
         ] {
             assert!(schemas.contains_key(name), "missing schema {name}");

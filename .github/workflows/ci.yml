@@ -44,6 +44,13 @@ jobs:
       - run: make helm-template
       - run: docker compose config --quiet
 
+  containers:
+    name: container definition validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make container-check
+
   tooling:
     name: benchtool and driver checks
     runs-on: ubuntu-latest

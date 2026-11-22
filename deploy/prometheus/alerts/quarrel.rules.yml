@@ -57,3 +57,70 @@ groups:
         annotations:
           summary: "quarrel build info metric is stale"
           description: "The process may have restarted with a different metric registry."
+
+      # The rules below use canonical section 7 metric names. Engine-side
+      # series (TTFT, KV cache, Flight, model load) are reserved for future
+      # work; until they are emitted these rules simply never fire.
+      - alert: QuarrelHighTtftP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, model) (rate(quarrel_time_to_first_token_seconds_bucket[5m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel time-to-first-token p95 above 500 ms"
+          description: "The 95th percentile TTFT has exceeded 500 ms for ten minutes."
+          dashboard: "quarrel-overview"
+
+      - alert: QuarrelKvCacheSaturation
+        expr: |
+          sum by (model, pool) (quarrel_kv_cache_blocks_used)
+            / clamp_min(sum by (model, pool) (quarrel_kv_cache_blocks_capacity), 1) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel KV-cache pool above 90% capacity"
+          description: "A KV-cache pool has been over 90% full for ten minutes; expect evictions."
+          dashboard: "quarrel-overview"
+
+      - alert: QuarrelFlightErrorRate
+        expr: |
+          sum(rate(quarrel_flight_batches_total{status=~"(?i)(5..|error|fail.*)"}[5m]))
+            / clamp_min(sum(rate(quarrel_flight_batches_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel Flight batch error rate above 5%"
+          description: "More than 5% of Arrow Flight batches reported an error for five minutes."
+          dashboard: "quarrel-overview"
+
+      - alert: QuarrelModelLoadFailures
+        expr: |
+          sum(rate(quarrel_engine_errors_total{code=~"(?i).*(model|load|gguf).*"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel model load failures detected"
+          description: "Engine errors with a model/load/gguf code have been recorded for five minutes. Until a dedicated failure counter exists, this is a best-effort proxy."
+          dashboard: "quarrel-overview"
+
+      - alert: QuarrelSustainedRssGrowth
+        expr: deriv(quarrel_process_resident_bytes[1h]) > 100000
+        for: 30m
+        labels:
+          severity: warning
+          service: quarrel
+        annotations:
+          summary: "quarrel RSS is growing steadily"
+          description: "Resident set size has grown by more than 100 kB/s for thirty minutes (~10 GB/hour); investigate a slow leak."
+          dashboard: "quarrel-overview"

@@ -434,6 +434,13 @@ pub struct GenerateResponseBuilder {
     top_logprobs: ArrayRef,
     finish_reasons: [ArrayRef; 2],
     schema: SchemaRef,
+    /// Identity assigned by a [`crate::ResponseBatchPool`], if pooled.
+    ///
+    /// Standalone builders have no pool identity. The pool uses these fields
+    /// to reject builders released to the wrong pool or twice.
+    pool_id: Option<u64>,
+    /// Stable identity of this builder within its owning pool.
+    builder_id: u64,
 }
 
 impl Default for GenerateResponseBuilder {
@@ -460,7 +467,26 @@ impl GenerateResponseBuilder {
             top_logprobs: empty_top_logprobs()?,
             finish_reasons: [finish_reason_array(false)?, finish_reason_array(true)?],
             schema: generate_response_schema(),
+            pool_id: None,
+            builder_id: 0,
         })
+    }
+
+    /// Attach the identity assigned by a [`crate::ResponseBatchPool`].
+    pub(crate) fn with_identity(mut self, pool_id: u64, builder_id: u64) -> Self {
+        self.pool_id = Some(pool_id);
+        self.builder_id = builder_id;
+        self
+    }
+
+    /// Pool that issued this builder, if any.
+    pub(crate) fn pool_id(&self) -> Option<u64> {
+        self.pool_id
+    }
+
+    /// Identity of this builder within its owning pool.
+    pub(crate) fn builder_id(&self) -> u64 {
+        self.builder_id
     }
 
     /// Encode one response token, reusing this builder's scratch capacity.
