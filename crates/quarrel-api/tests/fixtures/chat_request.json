@@ -1,0 +1,13 @@
+{
+  "model": "reference-tiny",
+  "messages": [
+    { "role": "system", "content": "Be brief." },
+    { "role": "user", "content": "Hello!" }
+  ],
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "max_tokens": 6,
+  "seed": 42,
+  "n": 1,
+  "user": "sdk-user"
+}

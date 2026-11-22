@@ -1,0 +1,18 @@
+{
+  "id": "cmpl-4f338f4d99eb29a3",
+  "object": "text_completion",
+  "created": 1700000000,
+  "model": "reference-tiny",
+  "choices": [
+    {
+      "index": 0,
+      "text": "m cs",
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 16,
+    "completion_tokens": 4,
+    "total_tokens": 20
+  }
+}

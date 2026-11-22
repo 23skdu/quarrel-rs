@@ -1,0 +1,15 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "index": 0,
+      "embedding": "j9VUPvQ3Kj6CE9q9kz1KPlLlxT2u4om9cpuDvuOQbb7Vc0k+Jo8MPjFrDr4B/Nm9ez1DvHyXJ72B3n68MIMjPqp0eb5FBGS+ugYwvg4yCD4NrZ2+JvOZPWX4Mj0bsqM9F0o8vSsvjz6MokG+i4p9PT4Slj67aVO+41WYPg1eKb4="
+    }
+  ],
+  "model": "reference-tiny",
+  "usage": {
+    "prompt_tokens": 5,
+    "total_tokens": 5
+  }
+}

@@ -19,7 +19,7 @@ use quarrel_engine::backend::{Backend, ReferenceBackend, generate};
 use tonic::{Request, Response, Status};
 
 use crate::{
-    FlightError, decode_generate_request, encode_generate_response, generate_response_schema,
+    FlightError, GenerateResponseBuilder, decode_generate_request_view, generate_response_schema,
     schema_hash,
 };
 
@@ -291,13 +291,14 @@ impl FlightService for QuarrelFlightService {
             .map_err(|err| FlightError::Transport(err.to_string()))?;
         let mut enqueued = Vec::new();
         for batch in batches {
-            let decoded = decode_generate_request(&batch).map_err(FlightError::to_status)?;
+            let decoded = decode_generate_request_view(&batch).map_err(FlightError::to_status)?;
             let request_id = decoded.request_id.as_str().to_owned();
-            let params = decoded.params.clone();
+            // The prompt is borrowed directly from the Arrow buffer; no token
+            // vector is copied on the request path.
             let tokens: Vec<Token> = generate(
                 self.inner.backend.as_ref(),
-                &decoded.token_ids,
-                &params,
+                decoded.token_ids,
+                &decoded.params,
                 deterministic_seed(&request_id),
                 self.inner.queue_depth,
             )
@@ -312,17 +313,19 @@ impl FlightService for QuarrelFlightService {
                 ));
             }
             let total = tokens.len();
+            let mut builder = GenerateResponseBuilder::new().map_err(FlightError::to_status)?;
             let responses = tokens
                 .into_iter()
                 .enumerate()
                 .map(|(index, token)| {
-                    encode_generate_response(
-                        &decoded.request_id,
-                        u64::try_from(index + 1).unwrap_or(u64::MAX),
-                        &token,
-                        index + 1 == total,
-                    )
-                    .map_err(FlightError::to_status)
+                    builder
+                        .encode(
+                            &decoded.request_id,
+                            u64::try_from(index + 1).unwrap_or(u64::MAX),
+                            &token,
+                            index + 1 == total,
+                        )
+                        .map_err(FlightError::to_status)
                 })
                 .collect::<Result<Vec<_>, Status>>()?;
             self.lock_requests()

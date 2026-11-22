@@ -1,0 +1,11 @@
+[
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"i\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"o\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"e\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"v\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"0\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"y\"}}]}",
+  "{\"id\":\"chatcmpl-84f5e03ac8d384c0\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"reference-tiny\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}",
+  "[DONE]"
+]

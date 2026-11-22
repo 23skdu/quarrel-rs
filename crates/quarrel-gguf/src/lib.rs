@@ -3,6 +3,9 @@
 //! The parser is built entirely from bounds-checked little-endian slice reads;
 //! it never panics on untrusted input. [`GgufFile`] parses bytes borrowed from
 //! any source, while [`GgufMmap`] owns a read-only memory map of a file on disk.
+//! [`matvec`] exposes allocation-free row-wise matrix-vector products for
+//! F32, F16, BF16, Q8_0 and Q4_0 weights; K-quant formats report a typed
+//! [`GgufError::UnsupportedDType`] rather than an invented layout.
 //!
 //! ```
 //! use quarrel_gguf::{DType, GgufFile, quant};
@@ -22,6 +25,7 @@ mod dtype;
 mod error;
 mod file;
 mod header;
+pub mod matvec;
 pub mod quant;
 
 #[cfg(test)]

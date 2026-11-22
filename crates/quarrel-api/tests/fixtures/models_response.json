@@ -1,0 +1,10 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "reference-tiny",
+      "object": "model",
+      "owned_by": "quarrel-rs"
+    }
+  ]
+}

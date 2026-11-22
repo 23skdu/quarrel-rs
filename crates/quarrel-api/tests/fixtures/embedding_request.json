@@ -1,0 +1,6 @@
+{
+  "model": "reference-tiny",
+  "input": ["hello", "world"],
+  "encoding_format": "float",
+  "dimensions": 32
+}

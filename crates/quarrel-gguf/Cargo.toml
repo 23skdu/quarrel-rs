@@ -12,6 +12,7 @@ authors.workspace = true
 bytes.workspace = true
 half.workspace = true
 memmap2.workspace = true
+quarrel-simd.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -23,4 +24,8 @@ proptest.workspace = true
 
 [[bench]]
 name = "quant"
+harness = false
+
+[[bench]]
+name = "matvec"
 harness = false

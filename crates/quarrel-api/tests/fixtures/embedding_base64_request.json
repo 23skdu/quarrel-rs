@@ -1,0 +1,5 @@
+{
+  "model": "reference-tiny",
+  "input": "hello",
+  "encoding_format": "base64"
+}

@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "unknown model `does-not-exist`; use GET /v1/models to list available models",
+    "type": "invalid_request_error",
+    "param": "model",
+    "code": "invalid_model"
+  }
+}

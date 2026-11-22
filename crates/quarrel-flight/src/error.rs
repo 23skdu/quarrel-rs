@@ -48,6 +48,21 @@ pub enum FlightError {
     /// The engine rejected a forward pass.
     #[error("engine error: {0}")]
     Engine(String),
+
+    /// A KV-cache dtype string was not one of the canonical Flight dtypes.
+    #[error("unsupported KV cache dtype: {0}")]
+    UnsupportedKvDtype(String),
+
+    /// A KV-cache dtype requires a host byte order this target does not have.
+    #[error("KV cache dtype {dtype} requires {expected}-endian host, running on {actual}-endian")]
+    EndiannessMismatch {
+        /// Canonical dtype string from the batch.
+        dtype: &'static str,
+        /// Byte order required by the payload encoding.
+        expected: &'static str,
+        /// Byte order of the host interpreting the payload.
+        actual: &'static str,
+    },
 }
 
 impl FlightError {
@@ -58,10 +73,13 @@ impl FlightError {
             Self::UnknownDescriptor(_) | Self::UnknownRequest(_) => {
                 tonic::Status::not_found(message)
             }
-            Self::InvalidArgument(_) | Self::ExpectedSingleRow(_) | Self::MissingField(_) => {
-                tonic::Status::invalid_argument(message)
+            Self::InvalidArgument(_)
+            | Self::ExpectedSingleRow(_)
+            | Self::MissingField(_)
+            | Self::UnsupportedKvDtype(_) => tonic::Status::invalid_argument(message),
+            Self::SchemaMismatch { .. } | Self::EndiannessMismatch { .. } => {
+                tonic::Status::failed_precondition(message)
             }
-            Self::SchemaMismatch { .. } => tonic::Status::failed_precondition(message),
             _ => tonic::Status::internal(message),
         }
     }

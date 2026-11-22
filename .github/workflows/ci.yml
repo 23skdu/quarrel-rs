@@ -26,6 +26,8 @@ jobs:
       - name: Install security tools
         run: cargo install cargo-audit cargo-deny --locked
       - run: make fmt-check
+      - run: make fuzz-fmt-check
+      - run: make precommit
       - run: make lint
       - run: make test
       - run: make security
@@ -54,3 +56,18 @@ jobs:
         with:
           python-version: '3.12'
       - run: make test-benchtool
+
+  fuzz:
+    name: fuzz targets smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - run: make fuzz-smoke

@@ -24,5 +24,10 @@ tonic.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 insta.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "arrow_roundtrip"
+harness = false

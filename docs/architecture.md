@@ -20,7 +20,7 @@ flowchart TB
 
     subgraph Transport["Transport plane"]
         Flight["quarrel-flight ✅<br/>schemas, adapters, tonic service"]
-        Api["quarrel-api 🚧<br/>axum routes, DTOs, OpenAPI, SSE"]
+        Api["quarrel-api ✅<br/>axum routes, DTOs, OpenAPI, SSE"]
     end
 
     subgraph Domain["Domain and orchestration"]
@@ -77,7 +77,7 @@ flowchart TB
 | `quarrel-gguf` | GGUF v1–v3 parser, `memmap2` ownership, typed tensor views, quant dequant/dot kernels | ✅ |
 | `quarrel-engine` | Scheduler, paged KV cache, radix prefix cache, sampler, health audit, backend trait, reference backend | ✅ |
 | `quarrel-flight` | Canonical Arrow schemas, zero-copy adapters, Flight service and IPC golden fixtures | ✅ |
-| `quarrel-api` | OpenAI DTOs, axum handlers, SSE streaming, generated OpenAPI document, WebUI | 🚧 |
+| `quarrel-api` | OpenAI DTOs, axum handlers, SSE streaming, generated OpenAPI document, WebUI | ✅ (WebUI placeholder) |
 | `quarrel-server` | CLI/config parsing and process lifecycle; delegates to the libraries above | ✅ |
 | `quarrel-observability` | Metric constants, recorder, tracing layers and OTLP feature (currently living in `quarrel-server`) | ⏳ |
 | `quarrel-backend-cpu` | Default execution backend | ⏳ |

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "quarrel-rs API",
-    "description": "OpenAI-compatible inference API and operations endpoints. Inference handlers return 501 until Phase 5 of docs/roadmap.md.",
+    "description": "OpenAI-compatible inference API and operations endpoints. Generation and embeddings use quarrel-engine's deterministic ReferenceBackend fixture (not Go parity); streaming responses emit chat.completion.chunk events.",
     "contact": {
       "name": "quarrel-rs contributors"
     },
@@ -18,7 +18,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Minimal embedded WebUI placeholder (replaced by the embedded bundle in Phase 5).",
+        "summary": "Minimal landing page with links to the API contract and operational endpoints.",
         "operationId": "root",
         "responses": {
           "200": {
@@ -39,7 +39,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Swagger UI page. Assets are pinned from unpkg; Phase 5 replaces this with an embedded bundle.",
+        "summary": "Swagger UI page for the generated contract. Assets are pinned from unpkg.",
         "operationId": "docs",
         "responses": {
           "200": {
@@ -123,7 +123,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Readiness probe. Reports that no model is loaded until Phase 1 is implemented.",
+        "summary": "Readiness probe. Reports whether GGUF models were discovered.",
         "operationId": "readyz",
         "responses": {
           "200": {
@@ -154,7 +154,7 @@
         "tags": [
           "openai"
         ],
-        "summary": "OpenAI chat completions. Reserved for Phase 5.",
+        "summary": "OpenAI chat completions. `stream: true` returns `text/event-stream` chunks terminated by\n`data: [DONE]`; heartbeats keep idle streams alive.",
         "operationId": "chat_completions",
         "requestBody": {
           "content": {
@@ -168,10 +168,54 @@
         },
         "responses": {
           "200": {
-            "description": "Chat completion"
+            "description": "Chat completion JSON, or chat.completion.chunk SSE when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionResponse"
+                }
+              }
+            }
           },
-          "501": {
-            "description": "Not implemented until Phase 5"
+          "400": {
+            "description": "Invalid request or unknown model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -181,7 +225,7 @@
         "tags": [
           "openai"
         ],
-        "summary": "OpenAI completions. Reserved for Phase 5.",
+        "summary": "OpenAI legacy completions. Multiple prompts produce one choice per prompt.\n`stream: true` uses the same `chat.completion.chunk` SSE framing as chat completions.",
         "operationId": "completions",
         "requestBody": {
           "content": {
@@ -195,10 +239,44 @@
         },
         "responses": {
           "200": {
-            "description": "Completion"
+            "description": "Text completion, or chunked SSE when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletionResponse"
+                }
+              }
+            }
           },
-          "501": {
-            "description": "Not implemented until Phase 5"
+          "400": {
+            "description": "Invalid request or unknown model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -208,7 +286,7 @@
         "tags": [
           "openai"
         ],
-        "summary": "OpenAI embeddings. Reserved for Phase 5.",
+        "summary": "Deterministic pseudo-embeddings from reference-backend logits, as float arrays or base64.",
         "operationId": "embeddings",
         "requestBody": {
           "content": {
@@ -222,10 +300,44 @@
         },
         "responses": {
           "200": {
-            "description": "Embeddings"
+            "description": "Embedding list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingList"
+                }
+              }
+            }
           },
-          "501": {
-            "description": "Not implemented until Phase 5"
+          "400": {
+            "description": "Invalid request or unknown model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -235,7 +347,7 @@
         "tags": [
           "openai"
         ],
-        "summary": "OpenAI model list. Empty until the model resolver lands in Phase 1.",
+        "summary": "OpenAI model list, discovered from `config.models_dir` by `quarrel_core::resolver`.",
         "operationId": "models",
         "responses": {
           "200": {
@@ -247,6 +359,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -254,9 +386,74 @@
   },
   "components": {
     "schemas": {
+      "ChatChoice": {
+        "type": "object",
+        "description": "One choice in a non-streaming chat response.",
+        "required": [
+          "index",
+          "message"
+        ],
+        "properties": {
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`stop` or `length`, matching OpenAI's finish-reason vocabulary."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based choice index.",
+            "minimum": 0
+          },
+          "message": {
+            "$ref": "#/components/schemas/ChatMessage",
+            "description": "Generated message; the role is always `assistant`."
+          }
+        }
+      },
+      "ChatCompletionChunk": {
+        "type": "object",
+        "description": "One `chat.completion.chunk` emitted on the SSE stream.",
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ],
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatStreamChoice"
+            },
+            "description": "Incremental choices."
+          },
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix creation timestamp shared by every chunk of one stream.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Identifier shared by every chunk of one stream."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for generation."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `chat.completion.chunk`."
+          }
+        }
+      },
       "ChatCompletionRequest": {
         "type": "object",
-        "description": "OpenAI chat completion request (subset supported by the eventual implementation).",
+        "description": "Subset of the OpenAI chat-completion request understood by the reference backend.\n\nFields not listed here are ignored on input so unmodified OpenAI SDKs can send their defaults.",
         "required": [
           "model",
           "messages"
@@ -276,18 +473,46 @@
             "items": {
               "$ref": "#/components/schemas/ChatMessage"
             },
-            "description": "Conversation messages."
+            "description": "Conversation messages, rendered as a `role: content` prompt."
           },
           "model": {
             "type": "string",
-            "description": "Model identifier."
+            "description": "Model id to generate with; must appear in `GET /v1/models`."
+          },
+          "repetition_penalty": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Repetition penalty applied to already-generated tokens."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seed for deterministic sampling.",
+            "minimum": 0
+          },
+          "stop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StringOrList",
+                "description": "Stop strings, either one string or a list of strings."
+              }
+            ]
           },
           "stream": {
             "type": [
               "boolean",
               "null"
             ],
-            "description": "Stream server-sent events when true."
+            "description": "Return `text/event-stream` chunks when `true`; defaults to `false`."
           },
           "temperature": {
             "type": [
@@ -295,13 +520,93 @@
               "null"
             ],
             "format": "float",
-            "description": "Sampling temperature."
+            "description": "Softmax temperature. `0.0` selects greedy decoding."
+          },
+          "top_k": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Top-k truncation; `0` disables it.",
+            "minimum": 0
+          },
+          "top_p": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Nucleus sampling mass."
+          }
+        }
+      },
+      "ChatCompletionResponse": {
+        "type": "object",
+        "description": "Non-streaming `POST /v1/chat/completions` response.",
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage"
+        ],
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatChoice"
+            },
+            "description": "Generated choices."
+          },
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix creation timestamp.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable request identifier prefixed with `chatcmpl-`."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for generation."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `chat.completion`."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "description": "Token accounting for the request."
+          }
+        }
+      },
+      "ChatDelta": {
+        "type": "object",
+        "description": "Incremental message content in an SSE chunk.",
+        "properties": {
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Generated text fragment; absent on the empty role and finish chunks."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Role, present only in the first chunk of a stream."
           }
         }
       },
       "ChatMessage": {
         "type": "object",
-        "description": "A chat message.",
+        "description": "A chat message in OpenAI role/content form.",
         "required": [
           "role",
           "content"
@@ -317,9 +622,63 @@
           }
         }
       },
+      "ChatStreamChoice": {
+        "type": "object",
+        "description": "One choice in an SSE chunk.",
+        "required": [
+          "index",
+          "delta"
+        ],
+        "properties": {
+          "delta": {
+            "$ref": "#/components/schemas/ChatDelta",
+            "description": "Incremental message fragment."
+          },
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Finish reason, present only on the last chunk before `[DONE]`."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based choice index.",
+            "minimum": 0
+          }
+        }
+      },
+      "CompletionChoice": {
+        "type": "object",
+        "description": "One choice in a completion response.",
+        "required": [
+          "index",
+          "text"
+        ],
+        "properties": {
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`stop` or `length`, matching OpenAI's finish-reason vocabulary."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based choice index.",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "description": "Generated text."
+          }
+        }
+      },
       "CompletionRequest": {
         "type": "object",
-        "description": "Legacy completion request.",
+        "description": "`POST /v1/completions` request, restricted to text prompts.",
         "required": [
           "model",
           "prompt"
@@ -336,38 +695,241 @@
           },
           "model": {
             "type": "string",
-            "description": "Model identifier."
+            "description": "Model id to generate with; must appear in `GET /v1/models`."
           },
           "prompt": {
-            "type": "string",
-            "description": "Prompt text."
+            "$ref": "#/components/schemas/StringOrList",
+            "description": "Prompt text, either one string or a list of strings."
+          },
+          "repetition_penalty": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Repetition penalty applied to already-generated tokens."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seed for deterministic sampling.",
+            "minimum": 0
+          },
+          "stream": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Return `text/event-stream` chunks when `true`; defaults to `false`."
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Softmax temperature. `0.0` selects greedy decoding."
+          },
+          "top_k": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Top-k truncation; `0` disables it.",
+            "minimum": 0
+          },
+          "top_p": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Nucleus sampling mass."
           }
         }
       },
+      "CompletionResponse": {
+        "type": "object",
+        "description": "Non-streaming `POST /v1/completions` response.",
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage"
+        ],
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletionChoice"
+            },
+            "description": "Generated choices."
+          },
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix creation timestamp.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable request identifier prefixed with `cmpl-`."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for generation."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `text_completion`."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "description": "Token accounting for the request."
+          }
+        }
+      },
+      "EmbeddingList": {
+        "type": "object",
+        "description": "Response for `POST /v1/embeddings`.",
+        "required": [
+          "object",
+          "data",
+          "model",
+          "usage"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingObject"
+            },
+            "description": "One embedding per input string, in request order."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used to produce the embeddings."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `list`."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/EmbeddingUsage",
+            "description": "Token accounting for the request."
+          }
+        }
+      },
+      "EmbeddingObject": {
+        "type": "object",
+        "description": "One embedding object in the response list.",
+        "required": [
+          "object",
+          "index",
+          "embedding"
+        ],
+        "properties": {
+          "embedding": {
+            "$ref": "#/components/schemas/EmbeddingPayload",
+            "description": "The embedding vector in the requested encoding."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Position of the input in the request.",
+            "minimum": 0
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `embedding`."
+          }
+        }
+      },
+      "EmbeddingPayload": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "IEEE-754 `f32` values returned as a JSON array."
+          },
+          {
+            "type": "string",
+            "description": "Base64-encoded little-endian `f32` bytes."
+          }
+        ],
+        "description": "Either the float array or the base64 form of an embedding."
+      },
       "EmbeddingRequest": {
         "type": "object",
-        "description": "Embedding request.",
+        "description": "`POST /v1/embeddings` request.",
         "required": [
           "model",
           "input"
         ],
         "properties": {
+          "encoding_format": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EncodingFormat",
+                "description": "Output encoding; defaults to [`EncodingFormat::Float`]."
+              }
+            ]
+          },
           "input": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Input strings to embed."
+            "$ref": "#/components/schemas/StringOrList",
+            "description": "Input strings, either one string or a list of strings."
           },
           "model": {
             "type": "string",
-            "description": "Model identifier."
+            "description": "Model id to embed with; must appear in `GET /v1/models`."
           }
         }
       },
+      "EmbeddingUsage": {
+        "type": "object",
+        "description": "Token accounting for an embeddings request.",
+        "required": [
+          "prompt_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of input tokens embedded.",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Same as `prompt_tokens` for embeddings.",
+            "minimum": 0
+          }
+        }
+      },
+      "EncodingFormat": {
+        "type": "string",
+        "description": "`encoding_format` accepted by the embeddings endpoint.",
+        "enum": [
+          "float",
+          "base64"
+        ]
+      },
       "ErrorDetail": {
         "type": "object",
-        "description": "OpenAI error detail object.",
+        "description": "The `error` object inside an [`ErrorEnvelope`].",
         "required": [
           "message",
           "type"
@@ -378,7 +940,7 @@
               "string",
               "null"
             ],
-            "description": "Machine-readable code."
+            "description": "Short machine-readable code."
           },
           "message": {
             "type": "string",
@@ -389,17 +951,17 @@
               "string",
               "null"
             ],
-            "description": "Offending parameter, when known."
+            "description": "Offending request parameter when known."
           },
           "type": {
             "type": "string",
-            "description": "Error category."
+            "description": "Error category, for example `invalid_request_error`."
           }
         }
       },
       "ErrorEnvelope": {
         "type": "object",
-        "description": "Top-level OpenAI error envelope.",
+        "description": "Top-level error object returned by every failing HTTP handler.",
         "required": [
           "error"
         ],
@@ -412,20 +974,20 @@
       },
       "HealthResponse": {
         "type": "object",
-        "description": "Liveness probe response.",
+        "description": "`GET /healthz` liveness response.",
         "required": [
           "status"
         ],
         "properties": {
           "status": {
             "type": "string",
-            "description": "Always `ok` when the process is alive."
+            "description": "Always `ok` while the process is alive."
           }
         }
       },
       "Model": {
         "type": "object",
-        "description": "A model as reported by `GET /v1/models`.",
+        "description": "One model reported by the OpenAI model-list endpoint.",
         "required": [
           "id",
           "object",
@@ -434,21 +996,21 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Model identifier used in requests."
+            "description": "Model identifier used in generation requests (the GGUF file stem)."
           },
           "object": {
             "type": "string",
-            "description": "Always `model` for OpenAI compatibility."
+            "description": "Always `model`."
           },
           "owned_by": {
             "type": "string",
-            "description": "Owning organisation, reserved for future multi-tenant support."
+            "description": "Owner of the model; `quarrel-rs` for locally discovered files."
           }
         }
       },
       "ModelList": {
         "type": "object",
-        "description": "OpenAI model list response.",
+        "description": "Response for `GET /v1/models`.",
         "required": [
           "object",
           "data"
@@ -459,7 +1021,7 @@
             "items": {
               "$ref": "#/components/schemas/Model"
             },
-            "description": "Available models; empty until Phase 1 lands the resolver."
+            "description": "Models discovered from the configured models directory, sorted by id."
           },
           "object": {
             "type": "string",
@@ -469,7 +1031,7 @@
       },
       "ReadyResponse": {
         "type": "object",
-        "description": "Readiness probe response.",
+        "description": "`GET /readyz` readiness response.",
         "required": [
           "status",
           "model_loaded"
@@ -477,11 +1039,56 @@
         "properties": {
           "model_loaded": {
             "type": "boolean",
-            "description": "Whether a model is loaded (false until Phase 1)."
+            "description": "Whether at least one GGUF model was discovered."
           },
           "status": {
             "type": "string",
-            "description": "`ready` or `unavailable`."
+            "description": "`ready` when the configured models directory exists."
+          }
+        }
+      },
+      "StringOrList": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "A single value, for example `\"hello\"`."
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Several values, for example `[\"hello\", \"world\"]`."
+          }
+        ],
+        "description": "A JSON value that may be a single string or an array of strings.\n\nUsed by `input` on embedding requests, `prompt` on completion requests and `stop` on generation\nrequests. Keeping the untagged representation in the DTO means handlers never have to accept\n`serde_json::Value` and lose compile-time checking."
+      },
+      "Usage": {
+        "type": "object",
+        "description": "Token accounting shared by chat and completion responses.",
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "properties": {
+          "completion_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of generated tokens.",
+            "minimum": 0
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of prompt tokens.",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sum of prompt and completion tokens.",
+            "minimum": 0
           }
         }
       }
@@ -494,7 +1101,7 @@
     },
     {
       "name": "openai",
-      "description": "OpenAI-compatible inference endpoints"
+      "description": "OpenAI-compatible inference endpoints backed by the reference backend"
     }
   ]
 }

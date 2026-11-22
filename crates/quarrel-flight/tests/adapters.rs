@@ -1,19 +1,27 @@
 use std::sync::Arc;
 
 use arrow::{
-    array::{Array, Float32Array, Int32Array, StringArray},
-    datatypes::{DataType, Field, Schema},
+    array::{
+        Array, ArrayRef, BooleanArray, FixedSizeListBuilder, Float32Array, Int32Array,
+        Int32Builder, ListBuilder, StringArray, StringBuilder, StringDictionaryBuilder,
+        UInt8Builder,
+    },
+    datatypes::{DataType, Field, Schema, UInt8Type},
     record_batch::RecordBatch,
 };
 use quarrel_core::{
     BlockId, GenerateRequest, KvBlock, KvDtype, ModelId, RequestId, SamplingParams, Token,
 };
 use quarrel_flight::{
-    FlightError, decode_embedding, decode_finished, decode_generate_request,
+    FlightError, GenerateResponseBuilder, assert_kv_dtype_endianness, decode_embedding,
+    decode_finished, decode_generate_request, decode_generate_request_view,
     decode_generate_response, decode_kv_block, decode_top_logprobs, embed_response_schema,
-    encode_embedding, encode_generate_request, encode_generate_response,
+    embedding_matrix_values, embedding_values, encode_embedding, encode_generate_request,
+    encode_generate_response, encode_generate_response_from_arrays,
     encode_generate_response_with_logprobs, encode_kv_block, generate_request_schema,
-    generate_response_schema, kv_blocks_schema,
+    generate_response_schema, kv_block_payload, kv_blocks_schema, kv_blocks_schema_for,
+    parse_kv_dtype, request_stop_token_ids, request_token_ids, response_logprobs,
+    response_token_ids,
 };
 
 fn request_id() -> RequestId {
@@ -246,4 +254,246 @@ fn decoders_reject_wrong_types_and_missing_fields() {
     )
     .unwrap();
     assert!(decode_generate_response(&floats).is_err());
+}
+
+fn one_column_batch(field: Field, column: ArrayRef) -> RecordBatch {
+    RecordBatch::try_new(Arc::new(Schema::new(vec![field])), vec![column]).unwrap()
+}
+
+fn kv_batch_with_dtype(raw: &str) -> RecordBatch {
+    let mut request_ids = StringBuilder::new();
+    let mut block_ids = arrow::array::UInt32Builder::new();
+    let mut layer_ids = arrow::array::UInt16Builder::new();
+    let mut dtypes = StringDictionaryBuilder::<UInt8Type>::new();
+    let mut blocks = FixedSizeListBuilder::new(UInt8Builder::new(), 2);
+    request_ids.append_value(request_id().as_str());
+    block_ids.append_value(1);
+    layer_ids.append_value(2);
+    dtypes.append_value(raw);
+    blocks.values().append_value(1);
+    blocks.values().append_value(2);
+    blocks.append(true);
+    RecordBatch::try_new(
+        kv_blocks_schema_for(2),
+        vec![
+            Arc::new(request_ids.finish()),
+            Arc::new(block_ids.finish()),
+            Arc::new(layer_ids.finish()),
+            Arc::new(dtypes.finish()),
+            Arc::new(blocks.finish()),
+        ],
+    )
+    .unwrap()
+}
+
+#[test]
+fn borrowed_request_and_payload_slices_point_into_arrow_buffers() {
+    let tokens: Vec<i32> = (0..1024).collect();
+    let stops = vec![-1, i32::MAX];
+    let request = GenerateRequest::new(
+        request_id(),
+        ModelId::new("m").unwrap(),
+        tokens.clone(),
+        SamplingParams {
+            stop_token_ids: stops.clone(),
+            ..params()
+        },
+        true,
+    )
+    .unwrap();
+    let batch = encode_generate_request(&request).unwrap();
+
+    let view = decode_generate_request_view(&batch).unwrap();
+    assert_eq!(view.token_ids, tokens);
+    assert_eq!(view.params.stop_token_ids, stops);
+    let ids = request_token_ids(&batch).unwrap();
+    let stop_ids = request_stop_token_ids(&batch).unwrap();
+    let raw_ids = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<arrow::array::ListArray>()
+        .unwrap();
+    let raw_ints = raw_ids
+        .values()
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .unwrap();
+    assert_eq!(ids.as_ptr(), raw_ints.values().as_ptr());
+    assert_eq!(stop_ids, stops);
+
+    let block = KvBlock::new(request_id(), BlockId::new(9), 3, KvDtype::F32, vec![7; 128]);
+    let kv_batch = encode_kv_block(&block).unwrap();
+    let payload = kv_block_payload(&kv_batch).unwrap();
+    assert_eq!(payload, block.bytes);
+    let raw_list = kv_batch
+        .column(4)
+        .as_any()
+        .downcast_ref::<arrow::array::FixedSizeListArray>()
+        .unwrap();
+    let raw_bytes = raw_list
+        .values()
+        .as_any()
+        .downcast_ref::<arrow::array::UInt8Array>()
+        .unwrap();
+    assert_eq!(payload.as_ptr(), raw_bytes.values().as_ptr());
+}
+
+#[test]
+fn kv_dtype_parsing_accepts_canonical_values_and_rejects_unknown() {
+    for (raw, expected) in [
+        ("f32", KvDtype::F32),
+        ("f16", KvDtype::F16),
+        ("turboquant", KvDtype::TurboQuant),
+    ] {
+        assert_eq!(parse_kv_dtype(raw).unwrap(), expected);
+        assert_eq!(
+            decode_kv_block(&kv_batch_with_dtype(raw)).unwrap().dtype,
+            expected
+        );
+    }
+    assert!(matches!(
+        parse_kv_dtype("bf16"),
+        Err(FlightError::UnsupportedKvDtype(_))
+    ));
+    assert!(matches!(
+        decode_kv_block(&kv_batch_with_dtype("bf16")),
+        Err(FlightError::UnsupportedKvDtype(_))
+    ));
+    assert_kv_dtype_endianness(KvDtype::F32).unwrap();
+    if cfg!(target_endian = "big") {
+        assert!(matches!(
+            assert_kv_dtype_endianness(KvDtype::F16),
+            Err(FlightError::EndiannessMismatch { .. })
+        ));
+    }
+}
+
+#[test]
+fn borrowed_slice_helpers_reject_nulls_and_wrong_types() {
+    let mut token_ids = ListBuilder::new(Int32Builder::new());
+    token_ids.append(false);
+    let batch = one_column_batch(
+        Field::new(
+            "token_ids",
+            DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+            true,
+        ),
+        Arc::new(token_ids.finish()),
+    );
+    assert!(matches!(
+        request_token_ids(&batch),
+        Err(FlightError::InvalidArgument(_))
+    ));
+
+    let mut blocks = FixedSizeListBuilder::new(UInt8Builder::new(), 2);
+    blocks.values().append_value(1);
+    blocks.values().append_value(2);
+    blocks.append(false);
+    let batch = one_column_batch(
+        Field::new(
+            "blocks",
+            DataType::FixedSizeList(Arc::new(Field::new("item", DataType::UInt8, true)), 2),
+            true,
+        ),
+        Arc::new(blocks.finish()),
+    );
+    assert!(matches!(
+        kv_block_payload(&batch),
+        Err(FlightError::InvalidArgument(_))
+    ));
+
+    let embeddings = arrow::array::FixedSizeListArray::try_new_with_length(
+        Arc::new(Field::new("item", DataType::Float32, true)),
+        2,
+        Arc::new(Float32Array::from(vec![None, Some(2.0)])),
+        None,
+        1,
+    )
+    .unwrap();
+    let batch = one_column_batch(
+        Field::new(
+            "embedding",
+            DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 2),
+            false,
+        ),
+        Arc::new(embeddings),
+    );
+    assert!(matches!(
+        embedding_values(&batch),
+        Err(FlightError::InvalidArgument(_))
+    ));
+
+    let batch = one_column_batch(
+        Field::new("token_id", DataType::Utf8, false),
+        Arc::new(StringArray::from(vec!["x"])),
+    );
+    assert!(matches!(
+        response_token_ids(&batch),
+        Err(FlightError::SchemaMismatch { .. } | FlightError::MissingField(_))
+    ));
+
+    let batch = one_column_batch(
+        Field::new("embedding", DataType::Utf8, false),
+        Arc::new(StringArray::from(vec!["x"])),
+    );
+    assert!(matches!(
+        embedding_matrix_values(&batch),
+        Err(FlightError::InvalidArgument(_) | FlightError::MissingField(_))
+    ));
+}
+
+#[test]
+fn response_from_arrays_shares_token_buffers_and_checks_inputs() {
+    let ids = Int32Array::from(vec![42]);
+    let logprobs = Float32Array::from(vec![-0.25]);
+    let finished = BooleanArray::from(vec![true]);
+    let batch =
+        encode_generate_response_from_arrays(&request_id(), 7, &ids, &logprobs, &finished).unwrap();
+    assert_eq!(batch.schema(), generate_response_schema());
+    let raw_ids = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .unwrap();
+    assert_eq!(raw_ids.values().as_ptr(), ids.values().as_ptr());
+    assert_eq!(decode_generate_response(&batch).unwrap()[0].id, 42);
+    assert_eq!(response_token_ids(&batch).unwrap(), &[42]);
+    assert_eq!(response_logprobs(&batch).unwrap(), &[-0.25]);
+
+    let short = Int32Array::from(Vec::<i32>::new());
+    assert!(matches!(
+        encode_generate_response_from_arrays(&request_id(), 7, &short, &logprobs, &finished),
+        Err(FlightError::InvalidArgument(_))
+    ));
+    let null = Int32Array::from(vec![None]);
+    assert!(matches!(
+        encode_generate_response_from_arrays(&request_id(), 7, &null, &logprobs, &finished),
+        Err(FlightError::InvalidArgument(_))
+    ));
+}
+
+#[test]
+fn generate_response_builder_stabilises_scratch_and_round_trips() {
+    let mut builder = GenerateResponseBuilder::new().unwrap();
+    let token = Token::new(11, -0.125);
+    for index in 0..32 {
+        builder
+            .encode(&request_id(), index, &token, index == 31)
+            .unwrap();
+    }
+    let capacity = builder.scratch_capacity();
+    assert!(capacity > 0);
+    for index in 0..64 {
+        let batch = builder
+            .encode(&request_id(), index, &token, index == 63)
+            .unwrap();
+        assert_eq!(batch.schema(), generate_response_schema());
+        assert_eq!(
+            decode_generate_response(&batch).unwrap(),
+            vec![token.clone()]
+        );
+        assert_eq!(decode_finished(&batch).unwrap(), vec![index == 63]);
+        assert!(decode_top_logprobs(&batch).unwrap()[0].is_empty());
+        assert_eq!(builder.scratch_capacity(), capacity);
+    }
 }

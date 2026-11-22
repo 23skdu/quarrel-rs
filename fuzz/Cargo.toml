@@ -1,0 +1,38 @@
+[package]
+name = "quarrel-fuzz"
+description = "libFuzzer targets for quarrel-rs parsers, samplers and Arrow decoding"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.100.0"
+license = "Unlicense"
+repository = "https://github.com/23skdu/quarrel-rs"
+authors = ["quarrel-rs contributors"]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+quarrel-core = { path = "../crates/quarrel-core", version = "0.1.0" }
+quarrel-engine = { path = "../crates/quarrel-engine", version = "0.1.0" }
+quarrel-flight = { path = "../crates/quarrel-flight", version = "0.1.0" }
+quarrel-gguf = { path = "../crates/quarrel-gguf", version = "0.1.0" }
+
+[[bin]]
+name = "gguf_parse"
+path = "fuzz_targets/gguf_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sampling_params"
+path = "fuzz_targets/sampling_params.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "arrow_ipc"
+path = "fuzz_targets/arrow_ipc.rs"
+test = false
+doc = false

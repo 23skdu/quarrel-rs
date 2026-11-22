@@ -1,0 +1,9 @@
+{
+  "model": "reference-tiny",
+  "prompt": "Once upon a time",
+  "temperature": 0.2,
+  "max_tokens": 4,
+  "seed": 7,
+  "logprobs": null,
+  "user": "sdk-user"
+}

@@ -30,7 +30,8 @@ HOOKS_DIR := $(shell git rev-parse --git-path hooks 2>/dev/null || printf '.git/
 	build build-release run test test-unit test-benchtool nextest fmt fmt-check lint audit deny \
 	security shellcheck \
 	coverage coverage-floors bench bench-quality bench-performance bench-regression \
-	fuzz fuzz-smoke fuzz-coverage miri mutants outdated doc bloat openapi openapi-check metrics-check \
+	fuzz fuzz-fmt fuzz-fmt-check fuzz-smoke fuzz-coverage miri mutants outdated doc bloat openapi \
+	openapi-check metrics-check \
 	docker-build docker-up docker-down docker-logs \
 	helm-lint helm-template links ci clean distclean
 
@@ -174,24 +175,32 @@ bench-regression:
 
 ## Fuzz every target for 60 s (nightly + cargo-fuzz required)
 fuzz:
-	@for target in $(FUZZ_TARGETS); do \
+	@cd fuzz && for target in $(FUZZ_TARGETS); do \
 		echo "==> fuzzing $$target for 60s"; \
 		$(CARGO) fuzz run $$target -- -max_total_time=60; \
 	done
 
 ## Short 5 s fuzz pass per target, suitable for pull requests
 fuzz-smoke:
-	@for target in $(FUZZ_TARGETS); do \
+	@cd fuzz && for target in $(FUZZ_TARGETS); do \
 		echo "==> fuzzing $$target for 5s"; \
 		$(CARGO) fuzz run $$target -- -max_total_time=5; \
 	done
 
 ## Generate coverage reports for every fuzz target corpus
 fuzz-coverage:
-	@for target in $(FUZZ_TARGETS); do \
+	@cd fuzz && for target in $(FUZZ_TARGETS); do \
 		echo "==> fuzz coverage for $$target"; \
 		$(CARGO) fuzz coverage $$target; \
 	done
+
+## Apply rustfmt to the excluded fuzz crate with the pinned stable toolchain
+fuzz-fmt:
+	$(CARGO) fmt --manifest-path fuzz/Cargo.toml -p quarrel-fuzz
+
+## Fail if the fuzz crate is not rustfmt-clean
+fuzz-fmt-check:
+	$(CARGO) fmt --manifest-path fuzz/Cargo.toml -p quarrel-fuzz -- --check
 
 ## Run the workspace under Miri (requires `make tools-miri`)
 miri:
@@ -275,7 +284,7 @@ links:
 	@echo "grafana:    http://localhost:3000"
 
 ## Full local gate sequence used by CI
-ci: fmt-check lint test security openapi-check metrics-check helm-lint
+ci: fmt-check fuzz-fmt-check lint test security openapi-check metrics-check helm-lint
 	$(COMPOSE) config --quiet
 
 ## Remove build artefacts and generated caches

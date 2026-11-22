@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-84f5e03ac8d384c0",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "reference-tiny",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "ioev0y"
+      },
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 30,
+    "completion_tokens": 6,
+    "total_tokens": 36
+  }
+}

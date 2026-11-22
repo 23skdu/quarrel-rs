@@ -3,17 +3,20 @@
 Apache Arrow based inference engine in Rust — a clean-room rewrite of
 [longbow-quarrel](https://github.com/23skdu/longbow-quarrel).
 
-> **Status: Phase 0 complete; Phases 1–4 landing incrementally.** The HTTP control plane, generated
-> OpenAPI contract, Prometheus registry, Dockerfile, compose stack and Helm chart are implemented and
-> tested. `quarrel-core` and `quarrel-gguf` now provide the domain model, config, resolver, GGUF
-> parser and zero-copy quant kernels. Engine/Flight integration remains in progress; see
+> **Status: Phase 0 complete; Phases 1–5 landing incrementally.** The OpenAI-compatible HTTP plane,
+> generated OpenAPI contract, Prometheus registry, Arrow Flight service, Dockerfile, compose stack
+> and Helm chart are implemented and tested. `quarrel-core`, `quarrel-simd`, `quarrel-gguf`,
+> `quarrel-engine` and `quarrel-flight` provide the domain model, kernels, GGUF reader, sampler and
+> vector plane. Inference currently uses a deterministic reference backend, not Go parity; see
 > [docs/roadmap.md](docs/roadmap.md).
 
 ## What works today
 
-- `quarrel-server`: axum API with `/healthz`, `/readyz`, `/v1/models`, `/metrics`, OpenAI-shaped
-  errors for the not-yet-implemented inference routes, bearer-token auth and graceful shutdown.
-- Generated OpenAPI 3.1 document at `/openapi.json` with Swagger UI at `/docs`.
+- `quarrel-server`: axum API with `/healthz`, `/readyz`, `/v1/models`, chat/completions/embeddings,
+  SSE streaming, `/metrics`, OpenAI-shaped errors, bearer-token auth, rate limiting and graceful
+  shutdown. Inference is served by the deterministic `ReferenceBackend` fixture.
+- Generated OpenAPI 3.1 document at `/openapi.json` with Swagger UI at `/docs`; contract replay
+  tests and fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) are green.
 - Prometheus metrics on the same port; compose stack with Prometheus + Grafana provisioning.
 - Helm chart with deployment, service, model PVC, ingress, HPA, ServiceMonitor and PrometheusRule.
 - `quarrel-core` (typed IDs, config, resolver, chat templates), `quarrel-simd` (runtime-dispatched
@@ -48,10 +51,10 @@ Place `.gguf` models in `./models/` (mounted read-only into the container and ch
 
 | Interface | Endpoint | Status |
 |-----------|----------|--------|
-| OpenAI-compatible HTTP | `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models` | Contract + skeleton; inference in Phase 5 |
-| OpenAPI 3.1 / Swagger UI | `/openapi.json`, `/docs` | Implemented |
+| OpenAI-compatible HTTP | `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models` | Implemented on the reference backend (no Go parity claim) |
+| OpenAPI 3.1 / Swagger UI | `/openapi.json`, `/docs` | Implemented from handlers |
 | Prometheus | `/metrics` | Implemented (control-plane metrics) |
-| Arrow Flight (gRPC) | `/quarrel/v1/*` | Schema defined in [api/flight-schema.md](api/flight-schema.md), implementation in Phase 4 |
+| Arrow Flight (gRPC) | `/quarrel/v1/*` | Implemented; schemas in [api/flight-schema.md](api/flight-schema.md) |
 
 ## Layout
 

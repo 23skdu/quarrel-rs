@@ -35,10 +35,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing(config.log_json);
     let metrics = metrics::Metrics::install()?;
     let upkeep = api::spawn_upkeep(metrics.clone());
-    let state = api::AppState {
-        config: std::sync::Arc::new(config.clone()),
-        metrics,
-    };
+    let state = api::AppState::new(config.clone(), metrics);
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let router = api::build_router(state);
 

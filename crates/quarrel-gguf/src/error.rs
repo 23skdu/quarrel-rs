@@ -113,6 +113,33 @@ pub enum GgufError {
         lhs: usize,
     },
 
+    /// A matvec weight buffer does not match the shape implied by its operands.
+    #[error(
+        "invalid matvec shape: {actual} weight bytes for {rows} rows x {cols} cols \
+         (expected {expected})"
+    )]
+    InvalidMatvecShape {
+        /// Byte length required by the shape.
+        expected: usize,
+        /// Actual byte length of the weight buffer.
+        actual: usize,
+        /// Number of rows (output length).
+        rows: usize,
+        /// Number of columns (input length).
+        cols: usize,
+    },
+
+    /// A kernel needs finite values but found a NaN or infinity.
+    #[error("non-finite {role} at index {index}: {value}")]
+    NonFiniteValue {
+        /// Operand the value came from (`"input"` or `"weights"`).
+        role: &'static str,
+        /// Logical element index within that operand.
+        index: usize,
+        /// The offending value.
+        value: f32,
+    },
+
     /// An embedding row index is outside the tensor.
     #[error("row index {index} out of range (tensor has {rows} rows)")]
     RowOutOfRange {
