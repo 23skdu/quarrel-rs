@@ -34,6 +34,11 @@ flowchart TB
         Weights[("GGUF files<br/>memory-mapped, never fully loaded")]
     end
 
+    subgraph Native["Native real-model path"]
+        Runtime["quarrel-runtime ✅<br/>loader, tokenizer, forward, generation"]
+        Cli["quarrel-generate / quarrel-tokens ✅"]
+    end
+
     subgraph Backends["Execution backends"]
         Cpu["quarrel-backend-cpu ✅<br/>batch CPU forward pass"]
         Cuda["quarrel-backend-cuda ⏳<br/>feature-gated"]
@@ -55,6 +60,9 @@ flowchart TB
     Gguf --> Core
     Gguf --> Simd
     Gguf --> Weights
+    Runtime --> Gguf
+    Runtime --> Simd
+    Cli --> Runtime
     Engine --> Cpu
     Engine -. "future feature" .-> Cuda
     Engine -. "future feature" .-> Metal
@@ -75,7 +83,8 @@ flowchart TB
 | `quarrel-core` | Typed IDs, request/response models, sampling params, config, chat templates, model resolver, non-exhaustive errors | ✅ |
 | `quarrel-simd` | Scalar reference math and runtime-dispatched SIMD; the only home for hot-path `unsafe` | ✅ |
 | `quarrel-gguf` | GGUF v1–v3 parser/writer, `memmap2` ownership, typed tensor views, quant kernels, `quarrel-quantize` CLI | ✅ |
-| `quarrel-engine` | Scheduler, batch backend trait, paged KV cache, radix prefix cache, sampler with grammar PDA, health audit, reference backend | ✅ |
+| `quarrel-engine` | Scheduler, batch backend trait, paged KV cache, radix prefix cache, sampler with grammar PDA, health audit, architecture router, speculative decoding, reference backend | ✅ |
+| `quarrel-runtime` | Native GGUF loader/tokenizer/forward/generation for real Gemma 3 and SmolLM2 models; `quarrel-generate` and `quarrel-tokens` CLIs | ✅ |
 | `quarrel-flight` | Canonical Arrow schemas, zero-copy adapters, generate/embed Flight service and IPC golden fixtures | ✅ |
 | `pythonsdk` | `pyarrow.flight` client, pure-Python schema specs and notebook example | ✅ |
 | `quarrel-api` | OpenAI/Ollama DTOs, axum handlers, SSE/NDJSON streaming, grammar-constrained tool calls, generated OpenAPI document, embedded WebUI | ✅ |
@@ -188,6 +197,46 @@ Rules enforced by review, fuzzing and allocation benchmarks:
 - output builders are pre-sized and pooled, then frozen into `Arc<RecordBatch>`;
 - schema hash is reported in `quarrel_build_info{arrow_schema=...}` and Flight action metadata.
 
+### 3.2 Native GGUF execution path
+
+The HTTP/Flight planes still use `quarrel-engine`'s deterministic reference backend. Real weights
+are executed through `quarrel-runtime`, which is intentionally a separate library so the parity
+boundary stays explicit:
+
+```mermaid
+flowchart LR
+    A["GGUF file"] -->|"mmap, no payload copy"| B["quarrel-gguf header/tensors"]
+    B --> C["quarrel-runtime ModelConfig + Tokenizer"]
+    C --> D["InferenceSession KV cache"]
+    D --> E["forward: RMSNorm, RoPE, attention, FFN"]
+    E -->|"matvec on &[u8]"| F["quarrel-simd / quarrel-gguf kernels"]
+    F --> G["greedy or sampled token ids"]
+    G --> H["quarrel-generate / library caller"]
+```
+
+Gemma 3 uses NEOX RoPE with separate local/global bases, head-wise QK normalization and GELU-tanh;
+SmolLM2 uses interleaved RoPE and SwiGLU. The runtime builds BPE/SPM tokenizers from GGUF metadata,
+renders the chat prompt locally and decodes generated ids without downloading a tokenizer. Golden
+token sequences for both models are checked by `crates/quarrel-runtime/tests/real_models.rs` when
+`QUARREL_MODEL_DIR` points at the two public Q4_K_M files.
+
+### 3.3 SIMD kernel coverage by family
+
+All matvecs use the same runtime-dispatched facade. A forced backend is available for parity tests;
+auto mode selects AVX-512F, AVX2/FMA, SSE2, NEON or scalar once per process.
+
+| Families | Quantizations exercised | Hidden widths covered by tests |
+|----------|-------------------------|--------------------------------|
+| Llama, Mistral | F32, F16, BF16, Q8_0, Q4_0, Q5_0, Q4_K, Q5_K, Q6_K | 640, 960, 1024 |
+| Qwen2, Qwen3/3.5 | F16, BF16, Q8_0, Q4_K, Q5_K | 640, 960, 1024 |
+| Gemma 3/4 | F16, BF16, Q8_0, Q4_K, Q6_K | 640, 960, 1024 |
+| Phi-3, Granite | F16, Q8_0, Q5_0, Q4_K, Q6_K | 640, 960, 1024 |
+| SmolLM2 | F32, Q8_0, Q5_0, Q6_K | 960 |
+
+`quarrel-gguf::matvec::tests::popular_model_family_kernels_are_all_dispatched` asserts the dispatch
+table for every entry above, while `matvec_model_row_widths` checks numerical parity against a
+dequantized oracle for non-multiple row widths and K-quant blocks that straddle rows.
+
 ## 4. Switching models
 
 Switching is an **atomic registry swap**, not an in-place mutation. In-flight requests finish or are
@@ -231,10 +280,13 @@ Why this shape:
 
 ## 5. Observability cross-cut
 
-Metrics are declared once as constants and consumed by alerts and dashboards; `make metrics-check`
-fails when code, rules or panels drift. Tracing spans carry `request_id`, `model`, `seq` and
-`operation`, never prompt text at the default level. See [gates](gates.md) for the enforced checks
-and roadmap §7 for the canonical metric names.
+Metrics are declared once in `quarrel-server::metrics` and consumed by alerts, the canonical
+`grafana/dashboards/quarrel-overview.json` and the byte-identical Helm chart copy; `make
+metrics-check` fails when code, rules or panels drift. Tracing spans carry `request_id`, `model`,
+`seq` and `operation`, never prompt text at the default level. The optional `otel` feature exports
+OTLP spans and propagates W3C `traceparent` over HTTP and Flight; see [runtime](runtime.md) for the
+feature flags and [gates](gates.md) for the enforced checks. Roadmap §7 defines the canonical metric
+names.
 
 ## 6. Relationship to the roadmap
 

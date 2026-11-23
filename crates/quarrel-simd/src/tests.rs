@@ -3,7 +3,8 @@
 use proptest::prelude::*;
 
 use super::{
-    Backend, SimdError, argmax, detected_backend, dot_f32, dot_f32_into, scalar, softmax_into,
+    Backend, KernelMode, KernelSet, SimdError, argmax, detected_backend, dot_f32, dot_f32_into,
+    scalar, softmax_into,
 };
 
 pub(crate) fn ok<T>(result: Result<T, SimdError>) -> T {
@@ -74,6 +75,90 @@ fn cases() -> Vec<(Vec<f32>, Vec<f32>)> {
             (lhs, rhs)
         })
         .collect()
+}
+
+/// Finite inputs that stress chunk tails, signed zero, subnormals, extremes
+/// and cancellation without overflowing the dot-product accumulator.
+fn edge_cases() -> Vec<(Vec<f32>, Vec<f32>)> {
+    vec![
+        (vec![], vec![]),
+        (vec![0.0_f32; 17], vec![-0.0_f32; 17]),
+        (vec![1.0e-40_f32; 19], vec![1.0e-40_f32; 19]),
+        (
+            vec![
+                f32::MIN_POSITIVE,
+                -f32::MIN_POSITIVE,
+                0.0,
+                -0.0,
+                f32::MIN_POSITIVE,
+            ],
+            vec![
+                f32::MIN_POSITIVE,
+                f32::MIN_POSITIVE,
+                1.0,
+                1.0,
+                -f32::MIN_POSITIVE,
+            ],
+        ),
+        (
+            vec![1.0e18, -1.0e18, 1.0e18, -1.0e18, 1.0e18],
+            vec![1.0e18; 5],
+        ),
+        (vec![f32::MAX, -f32::MAX, 1.0, -1.0, f32::MAX], vec![1.0; 5]),
+    ]
+}
+
+/// Finite logits that stress stable softmax, ties and argmax edge cases.
+fn softmax_edge_logits() -> Vec<Vec<f32>> {
+    vec![
+        vec![f32::MAX, f32::MAX, 0.0, -f32::MAX],
+        vec![
+            f32::MIN_POSITIVE,
+            -f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            0.0,
+            -0.0,
+        ],
+        vec![0.0_f32; 17],
+        vec![5.0, 5.0, 5.0, 5.0, 4.999_999],
+        vec![1.0, f32::MAX, 1.0 - f32::EPSILON, 0.0, -f32::MAX],
+        vec![-1.0e30, -1.0e30, -2.0e30, -1.0e30 + 1.0e22],
+    ]
+}
+
+fn all_modes() -> [KernelMode; 6] {
+    [
+        KernelMode::Auto,
+        KernelMode::Scalar,
+        KernelMode::Sse2,
+        KernelMode::Avx2,
+        KernelMode::Avx512,
+        KernelMode::Neon,
+    ]
+}
+
+fn check_kernels(set: KernelSet, lhs: &[f32], rhs: &[f32]) {
+    check_dot(lhs, rhs, ok(set.dot(lhs, rhs)));
+
+    let mut product = vec![0.0_f32; lhs.len()];
+    ok(set.dot_into(lhs, rhs, &mut product));
+    check_mul(lhs, rhs, &product);
+
+    if !lhs.is_empty() {
+        let mut probs = vec![0.0_f32; lhs.len()];
+        ok(set.softmax_into(lhs, &mut probs));
+        check_softmax(lhs, &probs);
+        check_argmax(lhs, ok(set.argmax(lhs)));
+    }
+}
+
+fn check_softmax_edges(set: KernelSet) {
+    for logits in softmax_edge_logits() {
+        let mut probs = vec![0.0_f32; logits.len()];
+        ok(set.softmax_into(&logits, &mut probs));
+        check_softmax(&logits, &probs);
+        check_argmax(&logits, ok(set.argmax(&logits)));
+    }
 }
 
 #[test]
@@ -184,7 +269,10 @@ fn backend_is_stable_and_matches_platform() {
     assert_eq!(backend, detected_backend());
     #[cfg(target_arch = "x86_64")]
     {
-        if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+        if std::arch::is_x86_feature_detected!("avx512f") {
+            assert_eq!(backend, Backend::Avx512);
+        } else if std::arch::is_x86_feature_detected!("avx2")
+            && std::arch::is_x86_feature_detected!("fma")
         {
             assert_eq!(backend, Backend::Avx2);
         } else if std::arch::is_x86_feature_detected!("sse2") {
@@ -201,66 +289,128 @@ fn backend_is_stable_and_matches_platform() {
     assert_eq!(backend, Backend::Scalar);
 }
 
+#[test]
+fn all_available_kernels_match_scalar_oracle() {
+    for mode in all_modes() {
+        let Some(set) = KernelSet::for_mode(mode) else {
+            continue;
+        };
+        for (lhs, rhs) in cases().into_iter().chain(edge_cases()) {
+            check_kernels(set, &lhs, &rhs);
+        }
+        check_softmax_edges(set);
+    }
+}
+
+#[test]
+fn dispatch_forces_each_mode_and_is_stable() {
+    let lhs: Vec<f32> = (0..19).map(|i| (i as f32) * 0.375 - 3.0).collect();
+    let rhs: Vec<f32> = (0..19).map(|i| (i as f32) * -0.125 + 1.5).collect();
+
+    assert_eq!(KernelSet::auto().backend(), detected_backend());
+    let scalar = KernelSet::for_mode(KernelMode::Scalar).expect("scalar is always available");
+    let expected_product = {
+        let mut out = vec![0.0_f32; lhs.len()];
+        ok(scalar.dot_into(&lhs, &rhs, &mut out));
+        out
+    };
+    let expected_dot = ok(scalar.dot(&lhs, &rhs));
+    let expected_argmax = ok(scalar.argmax(&lhs));
+
+    for mode in all_modes() {
+        let Some(set) = KernelSet::for_mode(mode) else {
+            assert_eq!(mode.resolve(), None, "unexpected unavailable mode {mode:?}");
+            continue;
+        };
+        assert_eq!(Some(set.backend()), mode.resolve());
+
+        let dot = ok(set.dot(&lhs, &rhs));
+        assert_eq!(dot, ok(set.dot(&lhs, &rhs)), "unstable dot in {mode:?}");
+        check_dot(&lhs, &rhs, dot);
+        assert_close(dot, expected_dot, expected_dot.abs());
+
+        let mut product = vec![0.0_f32; lhs.len()];
+        ok(set.dot_into(&lhs, &rhs, &mut product));
+        let mut again = vec![0.0_f32; lhs.len()];
+        ok(set.dot_into(&lhs, &rhs, &mut again));
+        assert_eq!(product, again, "unstable dot_into in {mode:?}");
+        assert_eq!(product, expected_product);
+
+        let mut probs = vec![0.0_f32; lhs.len()];
+        ok(set.softmax_into(&lhs, &mut probs));
+        let mut probs_again = vec![0.0_f32; lhs.len()];
+        ok(set.softmax_into(&lhs, &mut probs_again));
+        assert_eq!(probs, probs_again, "unstable softmax in {mode:?}");
+        check_softmax(&lhs, &probs);
+
+        let index = ok(set.argmax(&lhs));
+        assert_eq!(index, ok(set.argmax(&lhs)), "unstable argmax in {mode:?}");
+        assert_eq!(index, expected_argmax);
+    }
+}
+
+#[test]
+fn forced_modes_report_typed_errors() {
+    for mode in all_modes() {
+        let Some(set) = KernelSet::for_mode(mode) else {
+            continue;
+        };
+        assert_eq!(
+            set.dot(&[1.0], &[1.0, 2.0]),
+            Err(SimdError::LengthMismatch { lhs: 1, rhs: 2 })
+        );
+        let mut out = [0.0_f32; 1];
+        assert_eq!(
+            set.dot_into(&[1.0, 2.0], &[1.0, 2.0], &mut out),
+            Err(SimdError::OutputLengthMismatch {
+                expected: 2,
+                actual: 1
+            })
+        );
+        assert_eq!(set.argmax(&[]), Err(SimdError::EmptyInput));
+        let mut probs = [0.0_f32; 1];
+        assert!(matches!(
+            set.softmax_into(&[f32::NAN], &mut probs),
+            Err(SimdError::NonFinite { index: 0, .. })
+        ));
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 mod arch_x86 {
     use super::*;
 
     #[test]
     fn sse2_kernels_match_scalar_reference() {
-        if !std::arch::is_x86_feature_detected!("sse2") {
+        let Some(set) = KernelSet::for_mode(KernelMode::Sse2) else {
             return;
+        };
+        for (lhs, rhs) in cases().into_iter().chain(edge_cases()) {
+            check_kernels(set, &lhs, &rhs);
         }
-        for (lhs, rhs) in cases() {
-            // SAFETY: SSE2 was detected above and the slices are valid.
-            let got = unsafe { crate::x86::dot_sse2(&lhs, &rhs) };
-            check_dot(&lhs, &rhs, got);
-
-            let mut product = vec![0.0_f32; lhs.len()];
-            // SAFETY: SSE2 was detected; input lengths match and chunks are in bounds.
-            unsafe { crate::x86::mul_into_sse2(&lhs, &rhs, &mut product) };
-            check_mul(&lhs, &rhs, &product);
-
-            if !lhs.is_empty() {
-                let mut probs = vec![0.0_f32; lhs.len()];
-                // SAFETY: SSE2 was detected; inputs are finite, non-empty and equal-length.
-                unsafe { crate::x86::softmax_into_sse2(&lhs, &mut probs) };
-                check_softmax(&lhs, &probs);
-
-                // SAFETY: SSE2 was detected; the input is finite and non-empty.
-                let index = unsafe { crate::x86::argmax_sse2(&lhs) };
-                check_argmax(&lhs, index);
-            }
-        }
+        check_softmax_edges(set);
     }
 
     #[test]
     fn avx2_fma_kernels_match_scalar_reference() {
-        if !std::arch::is_x86_feature_detected!("avx2")
-            || !std::arch::is_x86_feature_detected!("fma")
-        {
+        let Some(set) = KernelSet::for_mode(KernelMode::Avx2) else {
             return;
+        };
+        for (lhs, rhs) in cases().into_iter().chain(edge_cases()) {
+            check_kernels(set, &lhs, &rhs);
         }
-        for (lhs, rhs) in cases() {
-            // SAFETY: AVX2 and FMA were detected above and the slices are valid.
-            let got = unsafe { crate::x86::dot_avx2(&lhs, &rhs) };
-            check_dot(&lhs, &rhs, got);
+        check_softmax_edges(set);
+    }
 
-            let mut product = vec![0.0_f32; lhs.len()];
-            // SAFETY: AVX2/FMA were detected; lengths match and chunks are in bounds.
-            unsafe { crate::x86::mul_into_avx2(&lhs, &rhs, &mut product) };
-            check_mul(&lhs, &rhs, &product);
-
-            if !lhs.is_empty() {
-                let mut probs = vec![0.0_f32; lhs.len()];
-                // SAFETY: AVX2/FMA were detected; inputs are finite, non-empty, equal-length.
-                unsafe { crate::x86::softmax_into_avx2(&lhs, &mut probs) };
-                check_softmax(&lhs, &probs);
-
-                // SAFETY: AVX2/FMA were detected; the input is finite and non-empty.
-                let index = unsafe { crate::x86::argmax_avx2(&lhs) };
-                check_argmax(&lhs, index);
-            }
+    #[test]
+    fn avx512_kernels_match_scalar_reference() {
+        let Some(set) = KernelSet::for_mode(KernelMode::Avx512) else {
+            return;
+        };
+        for (lhs, rhs) in cases().into_iter().chain(edge_cases()) {
+            check_kernels(set, &lhs, &rhs);
         }
+        check_softmax_edges(set);
     }
 }
 
@@ -270,30 +420,13 @@ mod arch_neon {
 
     #[test]
     fn neon_kernels_match_scalar_reference() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
+        let Some(set) = KernelSet::for_mode(KernelMode::Neon) else {
             return;
+        };
+        for (lhs, rhs) in cases().into_iter().chain(edge_cases()) {
+            check_kernels(set, &lhs, &rhs);
         }
-        for (lhs, rhs) in cases() {
-            // SAFETY: NEON was detected above and the slices are valid.
-            let got = unsafe { crate::aarch64::dot_neon(&lhs, &rhs) };
-            check_dot(&lhs, &rhs, got);
-
-            let mut product = vec![0.0_f32; lhs.len()];
-            // SAFETY: NEON was detected; lengths match and chunks are in bounds.
-            unsafe { crate::aarch64::mul_into_neon(&lhs, &rhs, &mut product) };
-            check_mul(&lhs, &rhs, &product);
-
-            if !lhs.is_empty() {
-                let mut probs = vec![0.0_f32; lhs.len()];
-                // SAFETY: NEON was detected; inputs are finite, non-empty, equal-length.
-                unsafe { crate::aarch64::softmax_into_neon(&lhs, &mut probs) };
-                check_softmax(&lhs, &probs);
-
-                // SAFETY: NEON was detected; the input is finite and non-empty.
-                let index = unsafe { crate::aarch64::argmax_neon(&lhs) };
-                check_argmax(&lhs, index);
-            }
-        }
+        check_softmax_edges(set);
     }
 }
 

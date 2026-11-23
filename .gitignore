@@ -23,11 +23,37 @@ rustc-ice-*.txt
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Compiled binaries, object files and shared libraries (source files stay tracked)
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.obj
+*.wasm
+*.bin
+*.app
+*.deb
+*.rpm
+/build/
+/out/
+/dist/
+
 # Model artifacts and local secrets (keep the placeholder tracked)
 models/*
 !models/.gitkeep
 *.gguf
+*.ggml
+*.ggjt
 *.safetensors
+*.onnx
+*.pt
+*.pth
+*.tflite
+*.mlmodel
+*.engine
+*.plan
 .env
 .env.local
 
@@ -43,3 +69,14 @@ artifacts/bench/*.tmp
 # Python bytecode from scripts/bench.py and its tests.
 __pycache__/
 *.py[cod]
+
+# Python virtual environments (never commit interpreters or installed packages)
+.venv/
+.venv-*/
+venv/
+venv-*/
+ENV/
+env/
+.virtualenv/
+.nox/
+.tox/

@@ -11,9 +11,15 @@ helm install quarrel helm/quarrel --namespace quarrel --create-namespace
 ```
 
 `values-monitoring.yaml` is a committed example that enables the ServiceMonitor,
-PrometheusRule and NetworkPolicy, shortens the probe intervals and raises the model PVC
-size. It also adds `release: prometheus` labels for a typical Operator selector. The
-Prometheus Operator CRDs must exist in the cluster for those resources to be accepted.
+PrometheusRule, Grafana dashboard ConfigMap and NetworkPolicy, shortens the probe intervals
+and raises the model PVC size. It also adds `release: prometheus` labels for a typical
+Operator selector and standard OTLP endpoint variables; traces are exported only when the
+image is built with the server's `otel` feature. The Prometheus Operator CRDs and a Grafana
+sidecar must exist in the cluster for those resources to be used.
+
+The dashboard ConfigMap renders `files/quarrel-overview.json`, which must stay byte-identical
+to `grafana/dashboards/quarrel-overview.json`. `make metrics-check` enforces that and checks
+all metric names against the Rust registry and alert rules.
 
 ## Values
 
@@ -43,6 +49,7 @@ Prometheus Operator CRDs must exist in the cluster for those resources to be acc
 | `config.logJson` | `true` | Render `QUARREL_LOG_JSON` in the ConfigMap |
 | `config.rustLog` | `info,quarrel_server=debug` | Render `RUST_LOG` in the ConfigMap |
 | `config.apiKey` | `""` | When set, render a Secret and require a Bearer token for `/v1/*` |
+| `config.extraEnv` | `{}` | Extra environment variables in the ConfigMap (for example `OTEL_EXPORTER_OTLP_*`) |
 | `persistence.enabled` | `true` | Create a PVC when `existingClaim` is empty |
 | `persistence.existingClaim` | `""` | Reuse an existing, populated model PVC (no PVC is created) |
 | `persistence.size` | `10Gi` | Requested PVC size when the chart creates it |
@@ -94,8 +101,15 @@ so probes can be reconfigured without template changes.
 | `monitoring.serviceMonitor.interval` | `15s` | Scrape interval |
 | `monitoring.serviceMonitor.scrapeTimeout` | `""` | Scrape timeout; empty uses the Prometheus default |
 | `monitoring.serviceMonitor.labels` | `{}` | Extra ServiceMonitor labels (Operator selector) |
+| `monitoring.serviceMonitor.relabelings` | `[]` | Standard target relabelings |
+| `monitoring.serviceMonitor.metricRelabelings` | `[]` | Standard metric relabelings before storage |
 | `monitoring.prometheusRule.enabled` | `false` | Create a baseline PrometheusRule |
 | `monitoring.prometheusRule.labels` | `{}` | Extra PrometheusRule labels (Operator selector) |
+| `monitoring.prometheusRule.additionalRules` | `[]` | Extra PrometheusRule rules appended to the baseline set |
+| `monitoring.grafanaDashboard.enabled` | `false` | Publish the committed overview dashboard as a discoverable ConfigMap |
+| `monitoring.grafanaDashboard.label` / `value` | `grafana_dashboard` / `1` | Sidecar discovery label |
+| `monitoring.grafanaDashboard.annotations` | `{}` | Extra dashboard ConfigMap annotations |
+| `monitoring.grafanaDashboard.folder` | `""` | Optional `k8s-sidecar-target-directory` value |
 | `ingress.enabled` | `false` | Create an Ingress for the HTTP API |
 | `ingress.className` | `""` | Ingress class name |
 | `ingress.annotations` / `ingress.tls` | `{}` / `[]` | Ingress annotations and TLS |

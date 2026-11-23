@@ -12,23 +12,28 @@
 //!
 //! - **F32** (GGUF type 0): four bytes per element, IEEE-754 binary32.
 //! - **F16** (type 1): two bytes per element, IEEE-754 binary16.
-//! - **BF16** (type 28): two bytes per element, bfloat16 (binary32 with the
+//! - **BF16** (type 30): two bytes per element, bfloat16 (binary32 with the
 //!   low 16 mantissa bits dropped).
-//! - **Q8_0** (type 6): 34-byte blocks. Bytes 0..2 hold an f16 scale, bytes
+//! - **Q8_0** (type 8): 34-byte blocks. Bytes 0..2 hold an f16 scale, bytes
 //!   2..34 hold 32 two's-complement `i8` values. Element `i` is
 //!   `scale * (block[2 + i] as i8)`.
 //! - **Q4_0** (type 2): 18-byte blocks. Bytes 0..2 hold an f16 scale, bytes
 //!   2..18 hold 16 bytes of packed 4-bit signed nibbles with bias 8 (range
 //!   -8..=7). The low nibble of byte `2 + j` is element `2 * j`, the high
 //!   nibble is element `2 * j + 1`. Element `i` is `scale * nibble`.
+//! - **Q5_0** (type 6): 22-byte blocks. Bytes 0..2 hold an f16 scale, bytes
+//!   2..6 hold 32 high bits as a little-endian `u32`, and bytes 6..22 hold
+//!   16 bytes of packed low nibbles. Element `j` uses the low nibble of byte
+//!   `qs[j]` plus high bit `j` of `qh`; element `j + 16` uses the high
+//!   nibble plus high bit `j + 16`. Both are biased by -16 and scaled by `d`.
 //!
-//! Q8_0/Q4_0 rows occupy `cols / 32 * block_bytes` bytes, so `cols` must be a
-//! nonzero multiple of 32. K-quant rows occupy `cols / 256 * block_bytes`
+//! Q8_0/Q4_0/Q5_0 rows occupy `cols / 32 * block_bytes` bytes, so `cols` must
+//! be a nonzero multiple of 32. K-quant rows occupy `cols / 256 * block_bytes`
 //! bytes, so `cols` must be a nonzero multiple of 256. All K-quant layouts
 //! below are the canonical ggml/llama.cpp little-endian super-block layouts
 //! (`QK_K = 256`), and all indices refer to bytes inside one 256-element block.
 //!
-//! - **Q2_K** (type 8, 84 bytes): bytes `0..16` hold 16 scale/min pairs packed
+//! - **Q2_K** (type 10, 84 bytes): bytes `0..16` hold 16 scale/min pairs packed
 //!   as `scale = b & 0xf`, `min = b >> 4`; bytes `16..80` hold 64 bytes with
 //!   four unsigned 2-bit quants per byte, in four 16-byte planes (one byte per
 //!   element of a 16-element group) selected by bits 0-1, 2-3, 4-5 and 6-7;
@@ -37,7 +42,7 @@
 //!   scale/min group is `n / 16`, the quant byte is `qs[32 * (n / 128) +
 //!   n % 32]`, the bit shift is `2 * ((n % 128) / 32)`, and the decoded value
 //!   is `d * scale * q - dmin * min`.
-//! - **Q3_K** (type 9, 110 bytes): bytes `0..32` hold the high (sign) bit of
+//! - **Q3_K** (type 11, 110 bytes): bytes `0..32` hold the high (sign) bit of
 //!   each quant; element `n` uses bit `(n % 128) / 32 + 4 * (n / 128)` of byte
 //!   `n % 32` (the bit acts as a sign: clear means subtract 4); bytes `32..96`
 //!   hold the low two bits in the same four-plane packing as Q2_K; bytes
@@ -50,7 +55,7 @@
 //!   bits are `(scales[8 + g % 4] >> (2 * ((g / 4) % 4))) & 3`. The result is
 //!   biased by -32. Element `n` uses scale `n / 16` and high-bit mask
 //!   `1 << ((n % 128) / 32 + 4 * (n / 128))`.
-//! - **Q4_K** (type 10, 144 bytes): bytes `0..2` and `2..4` hold the f16
+//! - **Q4_K** (type 12, 144 bytes): bytes `0..2` and `2..4` hold the f16
 //!   scales `d` and `dmin`; bytes `4..16` hold twelve 6-bit scale/min pairs
 //!   for eight 32-element groups (pairs `0..4` are `scales[j]`/`scales[j+4]`;
 //!   pairs `4..8` take the low four bits from `scales[j+4]` and the high two
@@ -58,12 +63,12 @@
 //!   two unsigned 4-bit quants per byte, low nibble first. Element `n` uses
 //!   group `n / 32` and quant byte `qs[32 * (n / 64) + n % 32]`; the value is
 //!   `d * scale * q - dmin * min`.
-//! - **Q5_K** (type 11, 176 bytes): the f16 scales, 6-bit scale/min pairs and
+//! - **Q5_K** (type 13, 176 bytes): the f16 scales, 6-bit scale/min pairs and
 //!   low 4-bit quants occupy the same offsets as Q4_K, with 32 high-bit bytes
 //!   at `16..48` (and the low nibbles at `48..176`). Element `n` adds 16 to
 //!   its low nibble when bit `1 << (2 * (n / 64) + (n % 64) / 32)` of
 //!   `qh[n % 32]` is set, giving an unsigned 5-bit quant.
-//! - **Q6_K** (type 12, 210 bytes): bytes `0..128` hold the low four bits of
+//! - **Q6_K** (type 14, 210 bytes): bytes `0..128` hold the low four bits of
 //!   each quant, bytes `128..192` hold the upper two bits of four quants per
 //!   byte (within each 128-element half, for `l` in `0..32`, elements `l`,
 //!   `l+32`, `l+64` and `l+96` share byte `l` in bits 0-1, 2-3, 4-5 and 6-7),
@@ -92,6 +97,7 @@ const BLOCK_ELEMENTS: usize = 32;
 const QK_K: usize = 256;
 const Q8_0_BLOCK_BYTES: usize = 34;
 const Q4_0_BLOCK_BYTES: usize = 18;
+const Q5_0_BLOCK_BYTES: usize = 22;
 const Q2_K_BLOCK_BYTES: usize = 84;
 const Q3_K_BLOCK_BYTES: usize = 110;
 const Q4_K_BLOCK_BYTES: usize = 144;
@@ -103,7 +109,7 @@ type KDecodeFn = fn(&[u8], usize, &mut [f32; QK_K]) -> Result<(), GgufError>;
 
 /// Dispatch a matvec to the kernel for `dtype`.
 ///
-/// F32, F16, BF16, Q8_0, Q4_0 and all five K-quants are supported. Only
+/// F32, F16, BF16, Q8_0, Q4_0, Q5_0 and all five K-quants are supported. Only
 /// genuinely unknown types return [`GgufError::UnsupportedDType`] without
 /// reading the buffers.
 pub fn matvec(
@@ -118,6 +124,7 @@ pub fn matvec(
         DType::BF16 => matvec_bf16(weights, input, out),
         DType::Q8_0 => matvec_q8_0(weights, input, out),
         DType::Q4_0 => matvec_q4_0(weights, input, out),
+        DType::Q5_0 => matvec_q5_0(weights, input, out),
         DType::Q2_K => matvec_q2_k(weights, input, out),
         DType::Q3_K => matvec_q3_k(weights, input, out),
         DType::Q4_K => matvec_q4_k(weights, input, out),
@@ -190,23 +197,79 @@ fn check_uniform_shape(
     Ok(row_bytes)
 }
 
-fn check_block_shape(
+/// Matrix–vector product over a flat ggml block stream.
+///
+/// GGUF quant blocks are laid out over the flattened tensor, not per row. A
+/// block may therefore straddle two rows when the row width is not a multiple
+/// of the block's element count. Decoding the flat stream and scattering each
+/// decoded value into `out[element / cols]` handles both aligned and straddling
+/// cases without a payload-sized temporary.
+fn matvec_blocks<const B: usize, F>(
     weights: &[u8],
     input: &[f32],
-    out: &[f32],
+    out: &mut [f32],
     block_bytes: usize,
-) -> Result<usize, GgufError> {
-    if !input.len().is_multiple_of(BLOCK_ELEMENTS) {
+    decode: F,
+) -> Result<(), GgufError>
+where
+    F: Fn(&[u8], usize, &mut [f32; B]) -> Result<(), GgufError>,
+{
+    if input.is_empty() || out.is_empty() {
+        return Err(GgufError::InvalidQuantArgument(
+            "matvec requires a non-empty input and output".to_owned(),
+        ));
+    }
+    let cols = input.len();
+    let rows = out.len();
+    let total_elements = cols.checked_mul(rows).ok_or(GgufError::Overflow)?;
+    if !total_elements.is_multiple_of(B) {
         return Err(GgufError::InvalidQuantArgument(format!(
-            "matvec input length {} must be a multiple of {BLOCK_ELEMENTS} for block quant data",
-            input.len()
+            "matrix has {total_elements} elements, which is not a multiple of block size {B}"
         )));
     }
-    let row_bytes = (input.len() / BLOCK_ELEMENTS)
-        .checked_mul(block_bytes)
-        .ok_or(GgufError::Overflow)?;
-    check_shape(weights, input, out, row_bytes)?;
-    Ok(row_bytes)
+    let blocks = total_elements / B;
+    let expected = blocks.checked_mul(block_bytes).ok_or(GgufError::Overflow)?;
+    if weights.len() != expected {
+        return Err(GgufError::InvalidMatvecShape {
+            expected,
+            actual: weights.len(),
+            rows,
+            cols,
+        });
+    }
+    check_finite(input, "input", 0)?;
+    out.fill(0.0);
+
+    for (block_index, block) in weights.chunks_exact(block_bytes).enumerate() {
+        let base = block_index.checked_mul(B).ok_or(GgufError::Overflow)?;
+        let mut decoded = [0.0f32; B];
+        decode(block, base, &mut decoded)?;
+        check_finite(&decoded, "weights", base)?;
+        let row = base / cols;
+        let offset = base % cols;
+        if offset == 0 && B <= cols {
+            // The whole block belongs to one output row: use the selected SIMD
+            // dot-product kernel so every quantized family shares the same
+            // optimized accumulation path.
+            let dot = dot_f32(&decoded[..B], &input[offset..offset + B])
+                .map_err(|_| internal_dot_error())?;
+            out[row] += dot;
+        } else {
+            // A K-quant block can straddle two rows when the model's hidden
+            // size is not a multiple of 256 (Gemma 3's 640-wide rows, for
+            // example). Scatter only the overlapping lanes in that case.
+            for (lane, &value) in decoded.iter().enumerate() {
+                let index = base + lane;
+                if index >= total_elements {
+                    break;
+                }
+                let row = index / cols;
+                let col = index % cols;
+                out[row] = value.mul_add(input[col], out[row]);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn decode_f32(bytes: &[u8], dst: &mut [f32]) {
@@ -286,99 +349,51 @@ pub fn matvec_bf16(weights: &[u8], input: &[f32], out: &mut [f32]) -> Result<(),
     matvec_uniform(weights, input, out, 2, decode_bf16)
 }
 
+fn decode_q8_0_block(
+    block: &[u8],
+    _base: usize,
+    decoded: &mut [f32; BLOCK_ELEMENTS],
+) -> Result<(), GgufError> {
+    let scale = f16::from_le_bytes([block[0], block[1]]).to_f32();
+    for (&encoded, value) in block[2..].iter().zip(decoded) {
+        *value = f32::from(encoded as i8) * scale;
+    }
+    Ok(())
+}
+
 /// Matrix–vector product with Q8_0 weights (34-byte blocks, 32 values each).
 pub fn matvec_q8_0(weights: &[u8], input: &[f32], out: &mut [f32]) -> Result<(), GgufError> {
-    let row_bytes = check_block_shape(weights, input, out, Q8_0_BLOCK_BYTES)?;
-    check_finite(input, "input", 0)?;
+    matvec_blocks::<BLOCK_ELEMENTS, _>(weights, input, out, Q8_0_BLOCK_BYTES, decode_q8_0_block)
+}
 
-    let cols = input.len();
-    for (row_index, (row, dst)) in weights
-        .chunks_exact(row_bytes)
-        .zip(out.iter_mut())
-        .enumerate()
-    {
-        let mut acc = 0.0f32;
-        for (block_index, (block, lhs)) in row
-            .as_chunks::<Q8_0_BLOCK_BYTES>()
-            .0
-            .iter()
-            .zip(input.as_chunks::<BLOCK_ELEMENTS>().0)
-            .enumerate()
-        {
-            let mut decoded = [0.0f32; BLOCK_ELEMENTS];
-            let scale = f16::from_le_bytes([block[0], block[1]]).to_f32();
-            for (&encoded, value) in block[2..].iter().zip(&mut decoded) {
-                *value = f32::from(encoded as i8) * scale;
-            }
-            let offset = block_index
-                .checked_mul(BLOCK_ELEMENTS)
-                .ok_or(GgufError::Overflow)?;
-            check_finite(&decoded, "weights", element_index(row_index, cols, offset)?)?;
-            acc += dot_f32(&decoded, lhs).map_err(|_| internal_dot_error())?;
-        }
-        *dst = acc;
+fn decode_q4_0_block(
+    block: &[u8],
+    _base: usize,
+    decoded: &mut [f32; BLOCK_ELEMENTS],
+) -> Result<(), GgufError> {
+    let scale = f16::from_le_bytes([block[0], block[1]]).to_f32();
+    for (pair_index, &packed) in block[2..].iter().enumerate() {
+        let low = (packed & 0x0f) as i8 - 8;
+        let high = (packed >> 4) as i8 - 8;
+        decoded[2 * pair_index] = f32::from(low) * scale;
+        decoded[2 * pair_index + 1] = f32::from(high) * scale;
     }
     Ok(())
 }
 
 /// Matrix–vector product with Q4_0 weights (18-byte blocks, 32 values each).
 pub fn matvec_q4_0(weights: &[u8], input: &[f32], out: &mut [f32]) -> Result<(), GgufError> {
-    let row_bytes = check_block_shape(weights, input, out, Q4_0_BLOCK_BYTES)?;
-    check_finite(input, "input", 0)?;
+    matvec_blocks::<BLOCK_ELEMENTS, _>(weights, input, out, Q4_0_BLOCK_BYTES, decode_q4_0_block)
+}
 
-    let cols = input.len();
-    for (row_index, (row, dst)) in weights
-        .chunks_exact(row_bytes)
-        .zip(out.iter_mut())
-        .enumerate()
-    {
-        let mut acc = 0.0f32;
-        for (block_index, (block, lhs)) in row
-            .as_chunks::<Q4_0_BLOCK_BYTES>()
-            .0
-            .iter()
-            .zip(input.as_chunks::<BLOCK_ELEMENTS>().0)
-            .enumerate()
-        {
-            let mut decoded = [0.0f32; BLOCK_ELEMENTS];
-            let scale = f16::from_le_bytes([block[0], block[1]]).to_f32();
-            for (pair_index, &packed) in block[2..].iter().enumerate() {
-                let low = (packed & 0x0f) as i8 - 8;
-                let high = (packed >> 4) as i8 - 8;
-                decoded[2 * pair_index] = f32::from(low) * scale;
-                decoded[2 * pair_index + 1] = f32::from(high) * scale;
-            }
-            let offset = block_index
-                .checked_mul(BLOCK_ELEMENTS)
-                .ok_or(GgufError::Overflow)?;
-            check_finite(&decoded, "weights", element_index(row_index, cols, offset)?)?;
-            acc += dot_f32(&decoded, lhs).map_err(|_| internal_dot_error())?;
-        }
-        *dst = acc;
-    }
-    Ok(())
+/// Matrix–vector product with Q5_0 weights (22-byte blocks, 32 values each).
+///
+/// See the module documentation for the exact byte layout and unpacking rules.
+pub fn matvec_q5_0(weights: &[u8], input: &[f32], out: &mut [f32]) -> Result<(), GgufError> {
+    matvec_blocks::<BLOCK_ELEMENTS, _>(weights, input, out, Q5_0_BLOCK_BYTES, decode_q5_0)
 }
 
 // ---- K-quants: canonical ggml super-blocks, decoded into stack arrays ----
-
-fn check_k_shape(
-    weights: &[u8],
-    input: &[f32],
-    out: &[f32],
-    block_bytes: usize,
-) -> Result<usize, GgufError> {
-    if !input.len().is_multiple_of(QK_K) {
-        return Err(GgufError::InvalidQuantArgument(format!(
-            "matvec input length {} must be a multiple of {QK_K} for K-quant data",
-            input.len()
-        )));
-    }
-    let row_bytes = (input.len() / QK_K)
-        .checked_mul(block_bytes)
-        .ok_or(GgufError::Overflow)?;
-    check_shape(weights, input, out, row_bytes)?;
-    Ok(row_bytes)
-}
 
 /// Read one f16 super-block scale; `base` is the logical index of the block.
 fn decode_f16_scale(pair: &[u8], base: usize) -> Result<f32, GgufError> {
@@ -400,31 +415,7 @@ fn matvec_k(
     block_bytes: usize,
     decode: KDecodeFn,
 ) -> Result<(), GgufError> {
-    let row_bytes = check_k_shape(weights, input, out, block_bytes)?;
-    check_finite(input, "input", 0)?;
-
-    let cols = input.len();
-    for (row_index, (row, dst)) in weights
-        .chunks_exact(row_bytes)
-        .zip(out.iter_mut())
-        .enumerate()
-    {
-        let mut acc = 0.0f32;
-        for (block_index, (block, lhs)) in row
-            .chunks_exact(block_bytes)
-            .zip(input.as_chunks::<QK_K>().0)
-            .enumerate()
-        {
-            let mut decoded = [0.0f32; QK_K];
-            let offset = block_index.checked_mul(QK_K).ok_or(GgufError::Overflow)?;
-            let base = element_index(row_index, cols, offset)?;
-            decode(block, base, &mut decoded)?;
-            check_finite(&decoded, "weights", base)?;
-            acc += dot_f32(&decoded, lhs).map_err(|_| internal_dot_error())?;
-        }
-        *dst = acc;
-    }
-    Ok(())
+    matvec_blocks::<QK_K, _>(weights, input, out, block_bytes, decode)
 }
 
 /// Q2_K: 16 packed scale/min pairs, 64 bytes of 2-bit quants, then `d`/`dmin`.
@@ -574,8 +565,97 @@ pub(crate) fn decode_q6_k(
         };
         let high = (qh[32 * half + l] >> high_shift) & 0x03;
         let q = i16::from(low | (high << 4)) - 32;
-        let scale = f32::from(scales[8 * half + l / 16 + scale_delta]);
+        // ggml stores these scales as `int8_t`; treating them as unsigned would
+        // turn every negative scale into a large positive weight.
+        let scale = f32::from(scales[8 * half + l / 16 + scale_delta] as i8);
         *value = d * scale * f32::from(q);
+    }
+    Ok(())
+}
+
+/// Decode one storage block of any supported dtype into `decoded`.
+///
+/// Returns the number of logical elements written. Callers provide a
+/// `[f32; QK_K]` scratch buffer so no payload-sized allocation is needed. This
+/// is shared by the matvec kernels and the strided embedding-row lookup used by
+/// tied LM heads.
+pub(crate) fn decode_block(
+    dtype: DType,
+    block: &[u8],
+    base: usize,
+    decoded: &mut [f32; QK_K],
+) -> Result<usize, GgufError> {
+    match dtype {
+        DType::F32 => {
+            decode_f32(block, &mut decoded[..1]);
+            Ok(1)
+        }
+        DType::F16 => {
+            decode_f16(block, &mut decoded[..1]);
+            Ok(1)
+        }
+        DType::BF16 => {
+            decode_bf16(block, &mut decoded[..1]);
+            Ok(1)
+        }
+        DType::Q8_0 => {
+            let mut small = [0.0f32; BLOCK_ELEMENTS];
+            decode_q8_0_block(block, base, &mut small)?;
+            decoded[..BLOCK_ELEMENTS].copy_from_slice(&small);
+            Ok(BLOCK_ELEMENTS)
+        }
+        DType::Q4_0 => {
+            let mut small = [0.0f32; BLOCK_ELEMENTS];
+            decode_q4_0_block(block, base, &mut small)?;
+            decoded[..BLOCK_ELEMENTS].copy_from_slice(&small);
+            Ok(BLOCK_ELEMENTS)
+        }
+        DType::Q5_0 => {
+            let mut small = [0.0f32; BLOCK_ELEMENTS];
+            decode_q5_0(block, base, &mut small)?;
+            decoded[..BLOCK_ELEMENTS].copy_from_slice(&small);
+            Ok(BLOCK_ELEMENTS)
+        }
+        DType::Q2_K => {
+            decode_q2_k(block, base, decoded)?;
+            Ok(QK_K)
+        }
+        DType::Q3_K => {
+            decode_q3_k(block, base, decoded)?;
+            Ok(QK_K)
+        }
+        DType::Q4_K => {
+            decode_q4_k(block, base, decoded)?;
+            Ok(QK_K)
+        }
+        DType::Q5_K => {
+            decode_q5_k(block, base, decoded)?;
+            Ok(QK_K)
+        }
+        DType::Q6_K => {
+            decode_q6_k(block, base, decoded)?;
+            Ok(QK_K)
+        }
+        other => Err(GgufError::UnsupportedDType(other)),
+    }
+}
+
+/// Decode one canonical Q5_0 block: f16 scale, 32 high bits, 16 packed nibbles.
+pub(crate) fn decode_q5_0(
+    block: &[u8],
+    base: usize,
+    decoded: &mut [f32; BLOCK_ELEMENTS],
+) -> Result<(), GgufError> {
+    let d = decode_f16_scale(&block[..2], base)?;
+    let qh = u32::from_le_bytes([block[2], block[3], block[4], block[5]]);
+    let qs = &block[6..Q5_0_BLOCK_BYTES];
+    for (lane, &packed) in qs.iter().enumerate() {
+        let high_low = ((qh >> lane) << 4) & 0x10;
+        let high_high = (qh >> (lane + BLOCK_ELEMENTS / 2 - 4)) & 0x10;
+        let low = i16::from((packed & 0x0f) | high_low as u8) - 16;
+        let high = i16::from((packed >> 4) | high_high as u8) - 16;
+        decoded[lane] = d * f32::from(low);
+        decoded[lane + BLOCK_ELEMENTS / 2] = d * f32::from(high);
     }
     Ok(())
 }
@@ -692,6 +772,31 @@ mod tests {
                 let high = (pair[1] + 8) as u8 & 0x0f;
                 bytes.push(low | (high << 4));
             }
+        }
+        bytes
+    }
+
+    fn q5_0_bytes(scale: f16, values: &[i16]) -> Vec<u8> {
+        assert_eq!(values.len() % BLOCK_ELEMENTS, 0);
+        let mut bytes = Vec::with_capacity(values.len() / BLOCK_ELEMENTS * Q5_0_BLOCK_BYTES);
+        for block in values.chunks(BLOCK_ELEMENTS) {
+            let mut qh = 0u32;
+            let mut qs = [0u8; BLOCK_ELEMENTS / 2];
+            for (lane, &value) in block.iter().enumerate() {
+                let biased = (value + 16) as u8;
+                assert!(biased < 32);
+                let (byte, shift, high_shift) = if lane < BLOCK_ELEMENTS / 2 {
+                    (&mut qs[lane], 0u32, lane as u32)
+                } else {
+                    let index = lane - BLOCK_ELEMENTS / 2;
+                    (&mut qs[index], 4u32, (index + BLOCK_ELEMENTS / 2) as u32)
+                };
+                *byte |= (biased & 0x0f) << shift;
+                qh |= u32::from((biased >> 4) & 1) << high_shift;
+            }
+            bytes.extend_from_slice(&scale.to_le_bytes());
+            bytes.extend_from_slice(&qh.to_le_bytes());
+            bytes.extend_from_slice(&qs);
         }
         bytes
     }
@@ -833,6 +938,29 @@ mod tests {
         let mut out = [f32::NAN; 2];
         matvec_q4_0(&weights, &input, &mut out).expect("valid q4_0 matvec");
         assert_eq!(out, [-56.0, -32.0]);
+    }
+
+    #[test]
+    fn matvec_q5_0_hand_computed() {
+        let mut values = [-16i16; 64];
+        values[0] = 0;
+        values[1] = -16;
+        values[16] = 15;
+        values[17] = 1;
+        let weights = q5_0_bytes(f16::from_f32(0.5), &values);
+        let mut input = [0.0f32; 32];
+        input[0] = 1.0;
+        input[1] = 2.0;
+        input[16] = 3.0;
+        input[17] = 4.0;
+        // 0*1 + -8*2 + 7.5*3 + 0.5*4 = 8.5
+        let mut out = [f32::NAN; 2];
+        matvec_q5_0(&weights, &input, &mut out).expect("valid q5_0 matvec");
+        assert_eq!(out[0], 8.5);
+        assert_eq!(out[1], -80.0);
+        let mut dispatched = [f32::NAN; 2];
+        matvec(DType::Q5_0, &weights, &input, &mut dispatched).expect("dispatched q5_0");
+        assert_eq!(dispatched, out);
     }
 
     #[test]
@@ -1016,6 +1144,187 @@ mod tests {
     }
 
     #[test]
+    fn matvec_q6_k_signed_scales() {
+        // ggml stores the 16 per-group scales as signed bytes. Negative scales
+        // must stay negative; reading them as u8 would invert their weights.
+        let mut scales = [0i8; 16];
+        scales[0] = -2;
+        scales[2] = 3;
+        let mut ql = [0u8; 128];
+        ql[0] = 0x21; // low nibble 1 -> q = -31
+        ql[32] = 0x03; // low nibble 3 -> q = -29
+        let qh = [0u8; 64];
+        let block = q6_k_block(&ql, &qh, &scales, f16::from_f32(0.5));
+        check_k_block(
+            decode_q6_k,
+            &block,
+            &[(0, 31.0), (32, -43.5)],
+            matvec_q6_k as Kernel,
+            DType::Q6_K,
+        );
+    }
+
+    #[test]
+    fn matvec_model_row_widths() {
+        use crate::quant::{
+            dequantize_bf16, dequantize_f16, dequantize_f32, dequantize_q4_k, dequantize_q5_0,
+            dequantize_q6_k, dequantize_q8_0, quantize_f32_to_q4_k, quantize_f32_to_q6_k,
+            quantize_f32_to_q8_0,
+        };
+
+        // widths from Gemma 3 (640), SmolLM2 (960) and common 1024-wide
+        // models. The K-quant cases deliberately straddle row boundaries.
+        for &(cols, rows) in &[(640usize, 2usize), (960, 4), (1024, 2)] {
+            let total = cols * rows;
+            let values: Vec<f32> = (0..total)
+                .map(|index| ((index % 23) as f32 - 11.0) / 16.0)
+                .collect();
+            let input: Vec<f32> = (0..cols)
+                .map(|index| 1.0 + (index % 7) as f32 * 0.125)
+                .collect();
+            let cases = [
+                (DType::F32, f32_bytes(&values), 1e-5f32),
+                (DType::F16, f16_bytes(&values), 1e-3),
+                (DType::BF16, bf16_bytes(&values), 1e-2),
+                (
+                    DType::Q8_0,
+                    quantize_f32_to_q8_0(&values).expect("q8_0 quantizer"),
+                    2e-2,
+                ),
+                // SmolLM2 stores attention and FFN projections as Q5_0.
+                (
+                    DType::Q5_0,
+                    q5_0_bytes(
+                        f16::from_f32(0.25),
+                        &values
+                            .iter()
+                            .map(|value| (value * 16.0).round() as i16)
+                            .collect::<Vec<_>>(),
+                    ),
+                    1e-5,
+                ),
+                (
+                    DType::Q4_K,
+                    quantize_f32_to_q4_k(&values).expect("q4_k quantizer"),
+                    8e-2,
+                ),
+                (
+                    DType::Q6_K,
+                    quantize_f32_to_q6_k(&values).expect("q6_k quantizer"),
+                    4e-2,
+                ),
+            ];
+
+            for (dtype, weights, tolerance) in cases {
+                let mut decoded = vec![0.0f32; total];
+                match dtype {
+                    DType::F32 => dequantize_f32(&weights, &mut decoded).unwrap(),
+                    DType::F16 => dequantize_f16(&weights, &mut decoded).unwrap(),
+                    DType::BF16 => dequantize_bf16(&weights, &mut decoded).unwrap(),
+                    DType::Q8_0 => dequantize_q8_0(&weights, &mut decoded).unwrap(),
+                    DType::Q5_0 => dequantize_q5_0(&weights, &mut decoded).unwrap(),
+                    DType::Q4_K => dequantize_q4_k(&weights, &mut decoded).unwrap(),
+                    DType::Q6_K => dequantize_q6_k(&weights, &mut decoded).unwrap(),
+                    _ => unreachable!("test only uses covered dtypes"),
+                }
+                let mut out = vec![f32::NAN; rows];
+                matvec(dtype, &weights, &input, &mut out)
+                    .unwrap_or_else(|error| panic!("matvec {dtype:?}, cols {cols}: {error}"));
+                for (row, &actual) in out.iter().enumerate() {
+                    let expected = dot_f32(&decoded[row * cols..(row + 1) * cols], &input)
+                        .expect("dot product");
+                    let scale = expected.abs().max(1.0);
+                    assert!(
+                        (actual - expected).abs() <= tolerance * scale,
+                        "{dtype:?} cols {cols} row {row}: got {actual}, expected {expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn popular_model_family_kernels_are_all_dispatched() {
+        // Every dtype used by common Q4_K_M/Q5_K_M/Q8_0 releases of these
+        // families must reach a SIMD-backed kernel through the public facade.
+        // All-zero blocks decode to zero so one compact fixture can validate
+        // dispatch and shape handling for each dtype without a model file.
+        let families: &[(&str, &[DType])] = &[
+            (
+                "llama",
+                &[
+                    DType::F32,
+                    DType::F16,
+                    DType::BF16,
+                    DType::Q8_0,
+                    DType::Q4_0,
+                    DType::Q5_0,
+                    DType::Q4_K,
+                    DType::Q5_K,
+                    DType::Q6_K,
+                ],
+            ),
+            (
+                "mistral",
+                &[DType::F16, DType::Q8_0, DType::Q4_K, DType::Q6_K],
+            ),
+            (
+                "qwen2/qwen3",
+                &[
+                    DType::F16,
+                    DType::BF16,
+                    DType::Q8_0,
+                    DType::Q4_K,
+                    DType::Q5_K,
+                ],
+            ),
+            (
+                "gemma3/gemma4",
+                &[
+                    DType::F16,
+                    DType::BF16,
+                    DType::Q8_0,
+                    DType::Q4_K,
+                    DType::Q6_K,
+                ],
+            ),
+            (
+                "phi3/granite",
+                &[
+                    DType::F16,
+                    DType::Q8_0,
+                    DType::Q4_K,
+                    DType::Q5_0,
+                    DType::Q6_K,
+                ],
+            ),
+            (
+                "smollm2",
+                &[DType::F32, DType::Q8_0, DType::Q5_0, DType::Q6_K],
+            ),
+        ];
+
+        const ROWS: usize = 8;
+        const BLOCKS_PER_ROW: usize = 8;
+        for &(family, dtypes) in families {
+            for &dtype in dtypes {
+                let cols = dtype.element_count() * BLOCKS_PER_ROW;
+                let blocks = ROWS * BLOCKS_PER_ROW;
+                let weights = vec![0u8; dtype.block_bytes() * blocks];
+                let input = vec![1.0f32; cols];
+                let mut out = vec![f32::NAN; ROWS];
+                matvec(dtype, &weights, &input, &mut out).unwrap_or_else(|error| {
+                    panic!("family {family} dtype {dtype:?} kernel failed: {error}")
+                });
+                assert!(
+                    out.iter().all(|value| *value == 0.0),
+                    "family {family} dtype {dtype:?} returned {out:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn dispatcher_matches_direct_kernels() {
         let values = [1.0f32, 2.0, 3.0, 4.0];
         let input = [0.5f32, -1.0, 2.0, 1.0];
@@ -1033,6 +1342,7 @@ mod tests {
 
         let q8 = q8_bytes(f16::from_f32(0.5), &[1i8; 32]);
         let q4 = q4_bytes(f16::from_f32(0.5), &[1i8; 32]);
+        let q5 = q5_0_bytes(f16::from_f32(0.5), &[1i16; 32]);
         let q8_input = [1.0f32; 32];
         let mut direct = [0.0f32; 1];
         let mut dispatched = [0.0f32; 1];
@@ -1041,6 +1351,9 @@ mod tests {
         assert_eq!(direct, dispatched);
         matvec_q4_0(&q4, &q8_input, &mut direct).expect("direct q4_0 kernel");
         matvec(DType::Q4_0, &q4, &q8_input, &mut dispatched).expect("dispatched q4_0");
+        assert_eq!(direct, dispatched);
+        matvec_q5_0(&q5, &q8_input, &mut direct).expect("direct q5_0 kernel");
+        matvec(DType::Q5_0, &q5, &q8_input, &mut dispatched).expect("dispatched q5_0");
         assert_eq!(direct, dispatched);
 
         // Every K-quant is reachable through both the dispatcher and its
@@ -1129,6 +1442,7 @@ mod tests {
         // Block quant kernels additionally require a whole number of blocks.
         let q8 = q8_bytes(f16::from_f32(0.5), &[1i8; 32]);
         let q4 = q4_bytes(f16::from_f32(0.5), &[1i8; 32]);
+        let q5 = q5_0_bytes(f16::from_f32(0.5), &[1i16; 32]);
         assert!(matches!(
             matvec_q8_0(&q8, &[1.0f32; 31], &mut [0.0; 1]),
             Err(GgufError::InvalidQuantArgument(_))
@@ -1143,6 +1457,14 @@ mod tests {
         ));
         assert!(matches!(
             matvec_q4_0(&q4[..q4.len() - 1], &[1.0f32; 32], &mut [0.0; 1]),
+            Err(GgufError::InvalidMatvecShape { .. })
+        ));
+        assert!(matches!(
+            matvec_q5_0(&q5, &[1.0f32; 31], &mut [0.0; 1]),
+            Err(GgufError::InvalidQuantArgument(_))
+        ));
+        assert!(matches!(
+            matvec_q5_0(&q5[..q5.len() - 1], &[1.0f32; 32], &mut [0.0; 1]),
             Err(GgufError::InvalidMatvecShape { .. })
         ));
 
@@ -1165,6 +1487,14 @@ mod tests {
         ));
         assert!(matches!(
             matvec_q4_0(&q4, &inf_input, &mut [0.0; 1]),
+            Err(GgufError::NonFiniteValue {
+                role: "input",
+                index: 7,
+                ..
+            })
+        ));
+        assert!(matches!(
+            matvec_q5_0(&q5, &inf_input, &mut [0.0; 1]),
             Err(GgufError::NonFiniteValue {
                 role: "input",
                 index: 7,

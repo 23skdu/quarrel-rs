@@ -9,6 +9,8 @@
 mod adapters;
 mod error;
 mod ipc;
+#[cfg(feature = "otel")]
+pub mod otel;
 mod pool;
 mod schema;
 mod service;

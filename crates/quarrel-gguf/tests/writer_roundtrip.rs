@@ -156,7 +156,7 @@ fn round_trip_all_targets_and_versions() {
             );
             assert_eq!(
                 header.metadata.get("general.file_type"),
-                Some(&MetadataValue::Uint32(target.as_u32()))
+                Some(&MetadataValue::Uint32(target.file_type()))
             );
             assert_eq!(
                 header.metadata.get("test.bool"),

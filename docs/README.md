@@ -14,8 +14,9 @@ source of truth for what is implemented and what remains open.
 | Document | Answers |
 |----------|---------|
 | [roadmap.md](roadmap.md) | Phased plan, per-item status, parity matrix and acceptance criteria. Tick a row only when its criteria pass locally. |
-| [architecture.md](architecture.md) | Rust package graph, data flow and the HTTP/Flight planes. |
+| [architecture.md](architecture.md) | Rust package graph, data flow, native runtime and the HTTP/Flight planes. |
 | [gates.md](gates.md) | What each gate checks and the exact local command that runs it. |
+| [runtime.md](runtime.md) | Native GGUF runtime, supported families/kernels and real-model golden checks. |
 
 ## Build and operate
 
@@ -37,6 +38,7 @@ make fuzz              # 60 s per libFuzzer target
 make test-benchtool    # Go benchtool and Python driver tests
 make test-pythonsdk    # pyarrow Flight SDK tests
 make shellcheck        # shell scripts
+QUARREL_MODEL_DIR=/path/to/models cargo test -p quarrel-runtime --test real_models
 ```
 
 A roadmap row may be ticked only when the relevant local gates above pass. Gates that need

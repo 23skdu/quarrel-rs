@@ -3,19 +3,25 @@
 Apache Arrow based inference engine in Rust — a clean-room rewrite of
 [longbow-quarrel](https://github.com/23skdu/longbow-quarrel).
 
-> **Status: Phase 0 complete; Phases 1–5 and the deployment plane landing incrementally.** The
-> OpenAI-compatible HTTP plane, embedded WebUI, Ollama shims, generated OpenAPI contract, Prometheus
-> registry, Arrow Flight service, container variants, compose stack and Helm chart are implemented
-> and tested. `quarrel-core`, `quarrel-simd`, `quarrel-gguf`, `quarrel-engine` and `quarrel-flight`
-> provide the domain model, kernels, GGUF reader, sampler and vector plane. Inference currently uses
-> a deterministic reference backend, not Go parity; see [docs/roadmap.md](docs/roadmap.md).
+> **Status: Phase 0 complete; Phases 1–7 landing incrementally.** The OpenAI-compatible HTTP plane,
+> embedded WebUI, Ollama shims, generated OpenAPI contract, Prometheus registry, Arrow Flight
+> service, container variants, compose stack and Helm chart are implemented and tested.
+> `quarrel-core`, `quarrel-simd`, `quarrel-gguf`, `quarrel-engine`, `quarrel-runtime` and
+> `quarrel-flight` provide the domain model, kernels, GGUF reader, sampler, native model runtime and
+> vector plane. The HTTP/Flight planes still use the deterministic reference backend; real-model
+> generation is available through `quarrel-runtime` and its CLIs. There is no Go parity claim; see
+> [docs/roadmap.md](docs/roadmap.md).
 
 ## What works today
 
 - `quarrel-server`: axum API with `/healthz`, `/readyz`, `/v1/models`, chat/completions/embeddings,
   SSE streaming, grammar-constrained tool calls, `/metrics`, OpenAI-shaped errors, bearer-token auth,
-  rate limiting and graceful shutdown. Inference is served by the deterministic `ReferenceBackend`
-  fixture.
+  rate limiting and graceful shutdown. HTTP inference is served by the deterministic
+  `ReferenceBackend` fixture; optional OTLP tracing is enabled with the `otel` feature.
+- `quarrel-runtime`: native, mmap-backed GGUF inference without FFI. It runs real Gemma 3 270M and
+  SmolLM2 360M Q4_K_M models to greedy, coherent output and ships `quarrel-generate` plus
+  `quarrel-tokens` CLIs. Q4_K/Q5_0/Q5_K/Q6_K/K-quant matvecs are SIMD-dispatched across AVX-512,
+  AVX2/FMA, SSE2, NEON and scalar backends.
 - Generated OpenAPI 3.1 document at `/openapi.json` with Swagger UI at `/docs`; contract replay
   tests and fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) are green.
 - Prometheus metrics on the same port; compose stack with Prometheus + Grafana provisioning and a
@@ -56,6 +62,24 @@ make helm-lint helm-template
 
 Place `.gguf` models in `./models/` (mounted read-only into the container and chart).
 
+Generate from a real Q4_K_M model with the native runtime (no model files are committed):
+
+```bash
+cargo run --release -p quarrel-runtime --bin quarrel-generate -- \
+  /path/to/SmolLM2-360M-Instruct-Q4_K_M.gguf \
+  "What is the capital of France?" --chat --ids
+cargo run --release -p quarrel-runtime --bin quarrel-tokens -- \
+  /path/to/gemma-3-270m-it-Q4_K_M.gguf \
+  "What is the capital of France?" --chat
+```
+
+Golden-token checks are opt-in because they need those two public model files:
+
+```bash
+QUARREL_MODEL_DIR=/path/to/models \
+  cargo test -p quarrel-runtime --test real_models -- --nocapture
+```
+
 ## Interfaces
 
 | Interface | Endpoint | Status |
@@ -75,8 +99,9 @@ api/                     Arrow Flight schema + generated OpenAPI document
 pythonsdk/               pyarrow.flight client, schema specs, examples and tests
 cmd/benchtool/           Go runner for quality/performance checks
 config/benchtool/        JSON profiles consumed by benchtool
-deploy/                  Prometheus rules and Grafana provisioning/dashboard
-helm/quarrel/            Kubernetes chart
+deploy/                  Prometheus scrape config and alert rules
+grafana/                 Canonical Grafana dashboard and provisioning files
+helm/quarrel/            Kubernetes chart (includes a copy of the dashboard ConfigMap)
 scripts/                 pre-commit hook, bench.py driver and helpers
 docs/README.md           documentation index and local validation model
 docs/roadmap.md          phased rewrite plan, parity matrix and quality gates
@@ -93,6 +118,7 @@ docs/testplan.md         master test plan and benchtool usage
 - [Documentation index](docs/README.md)
 - [Technical roadmap](docs/roadmap.md)
 - [Architecture and package graph](docs/architecture.md)
+- [Native GGUF runtime](docs/runtime.md)
 - [CI/CD gates](docs/gates.md)
 - [Container images](docs/containers.md)
 - [Metrics and dashboards](docs/metrics.md)

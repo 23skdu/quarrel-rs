@@ -8,12 +8,20 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# Optional W3C trace-context propagation for the Flight/gRPC plane. No exporter
+# or collector is configured here; trace export is owned by `quarrel-server`.
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
+
 [dependencies]
 arrow.workspace = true
 arrow-flight.workspace = true
 async-stream.workspace = true
 bytes.workspace = true
 futures.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
 prost.workspace = true
 quarrel-core.workspace = true
 quarrel-engine.workspace = true
@@ -22,11 +30,13 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true
 insta.workspace = true
 proptest.workspace = true
+tracing-subscriber.workspace = true
 
 [[bench]]
 name = "arrow_roundtrip"

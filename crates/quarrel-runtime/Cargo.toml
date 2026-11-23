@@ -1,0 +1,16 @@
+[package]
+name = "quarrel-runtime"
+description = "Native mmap-backed GGUF transformer runtime for real Gemma 3 and SmolLM2 models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+clap.workspace = true
+quarrel-gguf.workspace = true
+quarrel-simd.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

@@ -336,10 +336,12 @@ metrics-check:
 	@for metric in quarrel_requests_total quarrel_request_duration_seconds \
 		quarrel_build_info quarrel_process_resident_bytes quarrel_engine_errors_total; do \
 		grep -q "$$metric" crates/quarrel-server/src/metrics.rs || { echo "missing in code: $$metric"; exit 1; }; \
-		grep -q "$$metric" deploy/grafana/dashboards/quarrel-overview.json || { echo "missing in dashboard: $$metric"; exit 1; }; \
+		grep -q "$$metric" grafana/dashboards/quarrel-overview.json || { echo "missing in dashboard: $$metric"; exit 1; }; \
 	done
 	@grep -q 'quarrel_requests_total' deploy/prometheus/alerts/quarrel.rules.yml
-	@echo "metric names agree across code, alerts and dashboard"
+	@cmp grafana/dashboards/quarrel-overview.json helm/quarrel/files/quarrel-overview.json \
+		|| { echo "Grafana dashboard drift: copy grafana/dashboards/quarrel-overview.json into helm/quarrel/files/"; exit 1; }
+	@echo "metric names agree across code, alerts, dashboard and Helm chart"
 
 ## Build the CPU container image (default)
 docker-build: docker-build-cpu
@@ -400,10 +402,13 @@ links:
 ci: fmt-check fuzz-fmt-check lint test test-pythonsdk security openapi-check metrics-check helm-lint container-check
 	$(COMPOSE) config --quiet
 
-## Remove build artefacts, generated caches and unused Docker objects (named volumes kept)
+## Remove build artefacts, Python virtual environments and unused Docker objects (named volumes kept)
 clean:
 	$(CARGO) clean
 	rm -rf target/llvm-cov target/criterion .coverage coverage .pytest_cache
+	find . -type d \( -name '.venv' -o -name '.venv-*' -o -name 'venv' -o -name 'venv-*' \
+		-o -name '.virtualenv' -o -name 'ENV' -o -name 'env' -o -name '.nox' -o -name '.tox' \) \
+		-prune -exec rm -rf {} +
 	find . -name '*.profraw' -delete
 	-$(DOCKER) system prune -af
 

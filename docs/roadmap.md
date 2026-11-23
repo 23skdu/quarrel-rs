@@ -3,9 +3,11 @@
 > **Status:** Phase 0 is implemented; the Phase 1–4 library crates are complete with unit and
 > property tests. Fuzz targets (`gguf_parse`, `sampling_params`, `arrow_ipc`) pass 60 s runs. The
 > OpenAI/OpenAPI HTTP plane, embedded WebUI, Ollama shims, Python Flight SDK with generate/embed,
-> paged KV/batching/radix prefix engine primitives, all quant matvec kernels, Criterion/iai-callgrind
-> baselines, metric contract and container/Helm/deployment variants are live on the deterministic
-> reference backend. Oracle parity, hardware backends, remaining architecture/LoRA work and the
+> paged KV/batching/radix prefix engine primitives, architecture routing, speculative decoding,
+> all quant matvec kernels with a unified AVX2/AVX-512/NEON facade, Criterion/iai-callgrind
+> baselines, metric contract, optional OTLP tracing and container/Helm/deployment variants are
+> live. A native mmap-backed GGUF runtime now runs real Gemma 3 270M and SmolLM2 360M Q4_K_M
+> models through the CLI/library. Go oracle parity, CUDA/Metal backends, LoRA and the remaining
 > integration gates stay open until their acceptance criteria pass.
 > **Goal:** a clean-room Rust rewrite of [`23skdu/longbow-quarrel`](https://github.com/23skdu/longbow-quarrel)
 > that preserves its memory-efficient inference semantics while adding two first-class client planes:
@@ -320,13 +322,15 @@ green for every supported quant; quantizer output reloads identically.
 - [x] **P3-03** Paged KV cache with block tables, per-sequence isolation, rollback and prefix sharing.
 - [x] **P3-04** Radix-tree prompt prefix cache with LRU eviction and zero-copy prefix reuse.
 - [x] **P3-05** Sampler: temperature, top-K, top-P, repetition penalty, grammar-constrained PDA.
-- [ ] **P3-06** Dynamic architecture routing for llama/qwen2/qwen35/mistral/gemma4/phi3/smollm2/granite,
+- [x] **P3-06** Dynamic architecture routing for llama/qwen2/qwen35/mistral/gemma4/phi3/smollm2/granite,
       including Qwen 3.5 hybrid SSM + full-attention layers.
 - [x] **P3-07** Jinja2-subset chat template renderer (`{% for %}`, `{% if %}`, `{% set %}`, `{{ var }}`)
       with a fallback template.
-- [ ] **P3-08** Speculative decoding with `min(1, p_target/p_draft)` acceptance and residual correction.
+- [x] **P3-08** Speculative decoding with `min(1, p_target/p_draft)` acceptance and residual correction.
 - [ ] **P3-09** LoRA adapters: merge-on-load on CPU, hot-swappable fused projection on accelerators.
 - [x] **P3-10** Engine health audit (NaN/Inf/flat logits) surfaced as metrics and warnings.
+- [x] **P3-11** Native mmap-backed GGUF runtime with Gemma 3 and SmolLM2 tokenizer, forward pass and
+      deterministic greedy generation; validated against real Q4_K_M GGUFs.
 
 **Acceptance:** end-to-end generation matches Go on the golden suite; 100k-token sliding-window
 context holds constant VRAM; no data races under `cargo test --release` + `loom` for the scheduler.
@@ -365,7 +369,7 @@ schemas in `api/flight-schema.md`; allocator assertions show zero payload-copy a
       paged KV in VRAM, FP16 weights / FP32 activations at the boundary.
 - [ ] **P6-02** CUDA kernel parity tests (CPU vs GPU) and VRAM ceiling assertions.
 - [ ] **P6-03** Metal backend via `metal`, gated to `target_os = "macos"`, MSL kernels + tensor pool.
-- [ ] **P6-04** AVX2 / AVX-512 / NEON kernels behind one runtime-dispatch facade; scalar fallback.
+- [x] **P6-04** AVX2 / AVX-512 / NEON kernels behind one runtime-dispatch facade; scalar fallback.
 - [ ] **P6-05** Element-size audit table enforced by tests: CPU f32, CUDA weights f16/activations f32,
       Metal f16; positions and block tables f32 everywhere.
 
@@ -376,7 +380,7 @@ budget; unsafe code confined to P6-04 and FFI shims.
 
 - [x] **P7-01** Wire all §7 metrics into the code; add metric-name unit tests to prevent drift with
       `deploy/prometheus/alerts/quarrel.rules.yml` and the Grafana dashboard.
-- [ ] **P7-02** OTLP trace export behind the `otel` feature; propagators for HTTP and gRPC.
+- [x] **P7-02** OTLP trace export behind the `otel` feature; propagators for HTTP and gRPC.
 - [x] **P7-03** Dockerfile variants: CPU (default), CUDA (`nvidia/cuda` base), distroless runtime option.
 - [x] **P7-04** Helm values for model PVC, GPU resources, probes, NetworkPolicy, ServiceMonitor and
       PrometheusRule; add `helm unittest` golden templates.
@@ -453,9 +457,11 @@ The executable test plan is [docs/testplan.md](testplan.md), benchmark methodolo
 
 ## 7. Metrics, alerts and dashboard contract
 
-All names start with `quarrel_`. They are declared as constants in `quarrel-observability` and used
-verbatim in `deploy/prometheus/alerts/quarrel.rules.yml` and
-`deploy/grafana/dashboards/quarrel-overview.json`. A test greps all three locations for drift.
+All names start with `quarrel_`. They are declared as constants in `quarrel-server/src/metrics.rs`
+and used verbatim in `deploy/prometheus/alerts/quarrel.rules.yml` and the canonical dashboard at
+`grafana/dashboards/quarrel-overview.json`. The Helm chart carries a byte-identical copy at
+`helm/quarrel/files/quarrel-overview.json`; `make metrics-check` checks all four locations for
+drift.
 
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|

@@ -1,10 +1,10 @@
-//! AArch64 NEON kernels. All unsafe operations are confined here.
+//! AArch64 NEON kernels. Unsafe operations, target features and feature-gated
+//! intrinsics are confined to this module.
 
 #![cfg(target_arch = "aarch64")]
 
 use std::arch::aarch64::{
-    vaddq_f32, vaddvq_f32, vdivq_f32, vdupq_n_f32, vld1q_f32, vmaxq_f32, vmaxvq_f32, vmulq_f32,
-    vst1q_f32,
+    vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32, vmaxq_f32, vmaxvq_f32, vmulq_f32, vst1q_f32,
 };
 
 use crate::Kernels;
@@ -69,7 +69,8 @@ pub(crate) unsafe fn mul_into_neon(lhs: &[f32], rhs: &[f32], out: &mut [f32]) {
     }
 }
 
-/// NEON softmax. Inputs are validated by the public API.
+/// NEON softmax. Inputs are validated by the public facade before this kernel
+/// runs.
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn softmax_into_neon(logits: &[f32], out: &mut [f32]) {
     // SAFETY: NEON is enabled and the input is finite, non-empty and matches `out`.
@@ -85,7 +86,9 @@ pub(crate) unsafe fn softmax_into_neon(logits: &[f32], out: &mut [f32]) {
     for chunk in chunks {
         // SAFETY: the chunk is writable and holds four elements; NEON is enabled.
         let v = unsafe { vld1q_f32(chunk.as_ptr()) };
-        let scaled = vdivq_f32(v, scale);
+        // Multiplying by the reciprocal matches the scalar/SSE2/AVX kernels;
+        // dividing by `scale` would multiply by `total` instead.
+        let scaled = vmulq_f32(v, scale);
         // SAFETY: the same writable four-float chunk; no overlapping loads remain.
         unsafe { vst1q_f32(chunk.as_mut_ptr(), scaled) };
     }

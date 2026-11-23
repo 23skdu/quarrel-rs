@@ -7,3 +7,6 @@ metadata:
 data:
   QUARREL_LOG_JSON: {{ .Values.config.logJson | quote }}
   RUST_LOG: {{ .Values.config.rustLog | quote }}
+  {{- with .Values.config.extraEnv }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}

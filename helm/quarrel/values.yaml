@@ -44,6 +44,9 @@ config:
   rustLog: "info,quarrel_server=debug"
   # When set, rendered into a Secret and required for every /v1/* request.
   apiKey: ""
+  # Extra environment variables rendered into the ConfigMap. Use this for the
+  # standard OTEL_EXPORTER_OTLP_* variables when the image has the `otel` feature.
+  extraEnv: {}
 
 # GGUF model storage. Either let the chart create a PVC or point existingClaim
 # at one that is already populated; mountPath is passed to --models-dir.
@@ -143,10 +146,25 @@ monitoring:
     scrapeTimeout: ""
     # Extra labels, typically the Prometheus Operator selector label.
     labels: {}
+    # Standard ServiceMonitor relabelings applied to scrape targets.
+    relabelings: []
+    # Standard ServiceMetric relabelings applied before storage.
+    metricRelabelings: []
   prometheusRule:
     enabled: false
     # Extra labels, typically the Prometheus Operator selector label.
     labels: {}
+    # Additional PrometheusRule rules appended after the baseline alerts.
+    additionalRules: []
+  grafanaDashboard:
+    # Publish the committed overview dashboard as a ConfigMap that Grafana's
+    # sidecar can discover in the release namespace.
+    enabled: false
+    label: grafana_dashboard
+    value: "1"
+    annotations: {}
+    # Optional k8s-sidecar target folder annotation value.
+    folder: ""
 
 nodeSelector: {}
 tolerations: []

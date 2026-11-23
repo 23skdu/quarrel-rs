@@ -60,7 +60,7 @@ impl AppState {
 
 /// Build the complete router, including middleware, limits and Swagger UI.
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/", get(root))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
@@ -78,7 +78,14 @@ pub fn build_router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
-        .with_state(state)
+        .with_state(state);
+
+    // `otel` is the only build that gains trace propagation. The layer is added
+    // last so it wraps limits, CORS and the `TraceLayer` and can set the remote
+    // parent before any server span is created.
+    #[cfg(feature = "otel")]
+    let router = router.layer(axum::middleware::from_fn(crate::telemetry::propagate_trace));
+    router
 }
 
 /// Spawn the periodic exporter maintenance task.
@@ -163,7 +170,7 @@ fn bearer_token(request: &Request) -> Option<&str> {
 }
 
 /// Collapse concrete URLs into a bounded label set to keep Prometheus cardinality low.
-fn endpoint_label(path: &str) -> &'static str {
+pub(crate) fn endpoint_label(path: &str) -> &'static str {
     match path {
         "/" => "root",
         "/healthz" => "healthz",

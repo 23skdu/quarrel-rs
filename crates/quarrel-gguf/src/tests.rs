@@ -32,7 +32,7 @@ fn check_fixture(version: GgufVersion) {
     );
     assert_eq!(
         header.metadata.get("general.file_type"),
-        Some(&MetadataValue::Uint32(6))
+        Some(&MetadataValue::Uint32(8))
     );
     assert_eq!(
         header.metadata.get("llama.context_length"),
@@ -139,18 +139,20 @@ fn dtype_mapping_and_block_layout() {
         (0, DType::F32),
         (1, DType::F16),
         (2, DType::Q4_0),
-        (6, DType::Q8_0),
-        (8, DType::Q2_K),
-        (9, DType::Q3_K),
-        (10, DType::Q4_K),
-        (11, DType::Q5_K),
-        (12, DType::Q6_K),
-        (28, DType::BF16),
+        (6, DType::Q5_0),
+        (8, DType::Q8_0),
+        (10, DType::Q2_K),
+        (11, DType::Q3_K),
+        (12, DType::Q4_K),
+        (13, DType::Q5_K),
+        (14, DType::Q6_K),
+        (30, DType::BF16),
     ] {
         assert_eq!(DType::from_u32(code), dtype);
         assert_eq!(dtype.as_u32(), code);
     }
     assert_eq!(DType::from_u32(3), DType::Unknown(3));
+    assert_eq!(DType::from_u32(28), DType::Unknown(28));
     assert_eq!(DType::Unknown(999).as_u32(), 999);
 
     assert_eq!(
@@ -174,6 +176,10 @@ fn dtype_mapping_and_block_layout() {
         (18, 32)
     );
     assert_eq!(
+        (DType::Q5_0.block_bytes(), DType::Q5_0.element_count()),
+        (22, 32)
+    );
+    assert_eq!(
         (DType::Q2_K.block_bytes(), DType::Q2_K.element_count()),
         (84, 256)
     );
@@ -193,6 +199,11 @@ fn dtype_mapping_and_block_layout() {
         (DType::Q6_K.block_bytes(), DType::Q6_K.element_count()),
         (210, 256)
     );
+    // `general.file_type` uses the ggml ftype enum, not tensor dtype ids.
+    assert_eq!(DType::Q8_0.file_type(), 7);
+    assert_eq!(DType::Q4_K.file_type(), 12);
+    assert_eq!(DType::Q6_K.file_type(), 14);
+
     assert_eq!(DType::Unknown(3).block_bytes(), 0);
     assert_eq!(DType::Unknown(3).element_count(), 0);
 }

@@ -1,0 +1,21 @@
+{{- if .Values.monitoring.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "quarrel.fullname" . }}-grafana-dashboard
+  labels:
+    {{- include "quarrel.labels" . | nindent 4 }}
+    {{ .Values.monitoring.grafanaDashboard.label }}: {{ .Values.monitoring.grafanaDashboard.value | quote }}
+  {{- if or .Values.monitoring.grafanaDashboard.annotations .Values.monitoring.grafanaDashboard.folder }}
+  annotations:
+    {{- with .Values.monitoring.grafanaDashboard.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.monitoring.grafanaDashboard.folder }}
+    k8s-sidecar-target-directory: {{ . | quote }}
+    {{- end }}
+  {{- end }}
+data:
+  quarrel-overview.json: |-
+{{ .Files.Get "files/quarrel-overview.json" | indent 4 }}
+{{- end }}

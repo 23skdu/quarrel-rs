@@ -95,7 +95,7 @@ pub(super) fn fixture_bytes(version: GgufVersion) -> Vec<u8> {
             "general.name".to_owned(),
             MetadataValue::String("quarrel-test".to_owned()),
         ),
-        ("general.file_type".to_owned(), MetadataValue::Uint32(6)),
+        ("general.file_type".to_owned(), MetadataValue::Uint32(8)),
         (
             "llama.context_length".to_owned(),
             MetadataValue::Uint64(4096),
@@ -171,5 +171,5 @@ pub(super) fn fixture_bytes(version: GgufVersion) -> Vec<u8> {
 /// public `DType` mapping it is meant to test.
 mod dtype_code {
     pub(super) const Q4_0: u32 = 2;
-    pub(super) const Q8_0: u32 = 6;
+    pub(super) const Q8_0: u32 = 8;
 }

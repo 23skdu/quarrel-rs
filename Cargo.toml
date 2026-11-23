@@ -7,6 +7,7 @@ members = [
     "crates/quarrel-engine",
     "crates/quarrel-flight",
     "crates/quarrel-gguf",
+    "crates/quarrel-runtime",
     "crates/quarrel-server",
     "crates/quarrel-simd",
 ]
@@ -42,6 +43,10 @@ insta = "1"
 memmap2 = "0.9"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.17"
+# OpenTelemetry stack is exact-pinned and only pulled in by `otel` features.
+opentelemetry = { version = "=0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.33.1", default-features = false, features = ["trace", "http-proto", "grpc-tonic", "reqwest-client"] }
+opentelemetry_sdk = { version = "=0.33.1", default-features = false, features = ["trace"] }
 proptest = "1"
 prost = "0.14"
 rand = "0.9"
@@ -55,6 +60,7 @@ tonic = "0.14"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
+tracing-opentelemetry = { version = "=0.34.0", default-features = false }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 

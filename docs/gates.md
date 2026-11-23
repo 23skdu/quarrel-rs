@@ -96,7 +96,7 @@ Run all of them with `make test-benchtool`.
 | Gate | What it compares | Failure means |
 |------|------------------|---------------|
 | `openapi-check` | `api/openapi.json` vs `quarrel-server --print-openapi` | Regenerate with `make openapi` |
-| `metrics-check` | metric constants in code vs Prometheus rules vs Grafana dashboard | A panel or alert silently broke |
+| `metrics-check` | metric constants in code vs Prometheus rules vs canonical Grafana dashboard and its Helm copy | A panel, alert or chart asset silently broke |
 | `helm-lint` / `helm-template` | chart metadata and rendered manifests | Deployment broke |
 | `docker compose config` | compose file and mounted config paths | Local stack broke |
 

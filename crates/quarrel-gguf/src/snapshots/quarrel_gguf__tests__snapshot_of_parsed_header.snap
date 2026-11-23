@@ -10,7 +10,7 @@ GgufHeader {
             "llama",
         ),
         "general.file_type": Uint32(
-            6,
+            8,
         ),
         "general.name": String(
             "quarrel-test",

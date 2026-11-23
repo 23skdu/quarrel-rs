@@ -522,7 +522,7 @@ pub fn requantize_gguf(bytes: &[u8], target: DType) -> Result<Vec<u8>, GgufError
 
     for (key, value) in &file.header().metadata {
         let updated = if key == "general.file_type" && matches!(value, MetadataValue::Uint32(_)) {
-            MetadataValue::Uint32(target.as_u32())
+            MetadataValue::Uint32(target.file_type())
         } else {
             value.clone()
         };

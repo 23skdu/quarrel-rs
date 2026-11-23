@@ -240,8 +240,7 @@ mod tests {
     use super::{ALL_METRICS, test_metrics};
 
     const ALERTS: &str = include_str!("../../../deploy/prometheus/alerts/quarrel.rules.yml");
-    const DASHBOARD: &str =
-        include_str!("../../../deploy/grafana/dashboards/quarrel-overview.json");
+    const DASHBOARD: &str = include_str!("../../../grafana/dashboards/quarrel-overview.json");
 
     #[test]
     fn render_contains_build_info() {

@@ -8,11 +8,25 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# Optional OTLP trace export and W3C `traceparent` propagation. Off by default:
+# no collector and no OpenTelemetry dependencies are needed for normal builds.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry_sdk",
+    "dep:tracing-opentelemetry",
+]
+
 [dependencies]
 axum.workspace = true
 clap.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
 quarrel-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,6 +34,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["limit"] }
 tracing.workspace = true
+tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 utoipa.workspace = true
 

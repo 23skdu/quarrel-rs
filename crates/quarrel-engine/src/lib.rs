@@ -14,6 +14,12 @@
 //!   [`batch::Batch`], [`batch::Logits`] and [`batch::KvCacheView`]. The old
 //!   token-context trait remains unchanged; the new trait lives at a distinct
 //!   path because batch execution also carries per-sequence KV state.
+//! * [`architecture`] — deterministic routing from model/config identifiers to
+//!   attention/KV configuration profiles. This is a **routing/config layer**;
+//!   it does not claim parity with real model weights.
+//! * [`speculative`] — deterministic speculative decoding over a target and a
+//!   draft [`backend::Backend`], with `min(1, p_target / p_draft)` acceptance
+//!   and residual correction.
 //!
 //! The reference backend is a test fixture, **not** a Go-parity model. Use a
 //! real backend implementation when logits must match the Go engine.
@@ -27,6 +33,7 @@ use quarrel_gguf as _;
 use quarrel_simd as _;
 use smallvec as _;
 
+pub mod architecture;
 pub mod backend;
 pub mod batch;
 pub mod grammar;
@@ -34,6 +41,7 @@ pub mod health;
 pub mod kv;
 pub mod sampler;
 pub mod scheduler;
+pub mod speculative;
 
 /// Converts a numeric field into `usize` without assuming a particular
 /// integer width in `quarrel-core`.
@@ -267,6 +275,82 @@ pub enum EngineError {
         state: String,
         /// Offending token string.
         token: String,
+    },
+    /// A model/config identifier has no architecture routing profile.
+    #[error("unknown model architecture '{identifier}'")]
+    UnknownArchitecture {
+        /// Identifier supplied by the caller.
+        identifier: String,
+    },
+    /// An architecture config lacks data required for deterministic routing.
+    #[error("incomplete architecture config for '{identifier}': missing {missing}")]
+    IncompleteArchitecture {
+        /// Architecture identifier being routed.
+        identifier: String,
+        /// Name of the missing required field.
+        missing: &'static str,
+    },
+    /// A hybrid SSM/full-attention marker is not one the router understands.
+    #[error("malformed hybrid architecture marker '{marker}'")]
+    InvalidHybridMarker {
+        /// Raw marker supplied by the caller.
+        marker: String,
+    },
+    /// A declared layer count is outside the architecture's routing range.
+    #[error("architecture '{identifier}' supports {min}..={max} layers, got {layers}")]
+    ArchitectureLayerRange {
+        /// Architecture identifier being routed.
+        identifier: String,
+        /// Smallest supported layer count.
+        min: usize,
+        /// Largest supported layer count.
+        max: usize,
+        /// Layer count supplied by the caller.
+        layers: usize,
+    },
+    /// A speculative step received an empty probability distribution.
+    #[error("speculative probability distribution is empty")]
+    EmptyDistribution,
+    /// Two speculative distributions disagree on vocabulary size.
+    #[error("speculative distribution shape mismatch: expected {expected}, got {actual}")]
+    SpeculativeShapeMismatch {
+        /// Length of the target distribution.
+        expected: usize,
+        /// Length of the draft distribution.
+        actual: usize,
+    },
+    /// A speculative probability is non-finite, negative or greater than one.
+    #[error("speculative probability at index {index} is {reason}")]
+    InvalidProbability {
+        /// Index of the offending probability.
+        index: usize,
+        /// Short, stable description of the violation.
+        reason: &'static str,
+    },
+    /// A residual correction has no positive mass left to sample from.
+    #[error("speculative residual distribution has zero total mass")]
+    ZeroDistributionMass,
+    /// A speculative draft length is zero or exceeds the driver's cap.
+    #[error("invalid speculative draft length {length} (maximum {maximum})")]
+    InvalidDraftLength {
+        /// Draft length supplied by the caller.
+        length: usize,
+        /// Largest supported draft length.
+        maximum: usize,
+    },
+    /// A token index lies outside a speculative distribution.
+    #[error("speculative token index {index} is outside a vocabulary of {vocab_size}")]
+    SpeculativeTokenOutOfRange {
+        /// Token index supplied by the caller.
+        index: usize,
+        /// Number of entries in the distribution.
+        vocab_size: usize,
+    },
+    /// A caller-supplied uniform draw is not in `[0, 1)`.
+    #[error("speculative draw with bits {bits} is outside [0, 1)")]
+    InvalidDraw {
+        /// Raw `f64` bits of the invalid draw.
+        bits: u64,
     },
 }
 
