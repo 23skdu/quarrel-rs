@@ -18,7 +18,7 @@ jobs:
     name: fmt, clippy, tests and security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -38,8 +38,9 @@ jobs:
     name: helm and compose validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v5
+
       - run: make helm-lint
       - run: make helm-template
       - run: docker compose config --quiet
@@ -48,14 +49,14 @@ jobs:
     name: container definition validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: make container-check
 
   tooling:
     name: benchtool and driver checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -68,7 +69,7 @@ jobs:
     name: fuzz targets smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src, llvm-tools-preview
