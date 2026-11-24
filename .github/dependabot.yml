@@ -7,7 +7,8 @@ updates:
   - package-ecosystem: cargo
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "cron"
+      cronjob: "0 0 */2 * *"
       day: monday
       time: "06:00"
       timezone: Etc/UTC
