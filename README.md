@@ -128,3 +128,7 @@ docs/testplan.md         master test plan and benchtool usage
 - [Python Flight SDK](pythonsdk/README.md)
 - [Upstream Go engine](https://github.com/23skdu/longbow-quarrel)
 - [Rust API guidelines](https://rust-lang.github.io/api-guidelines/)
+
+## License
+
+This project is released into the public domain under the [Unlicense](https://unlicense.org). See [LICENSE](LICENSE) for details.
